@@ -11,6 +11,7 @@ import xarray as xr
 import time
 
 import namelist
+from dask.distributed import LocalCluster, Client
 from intensity import coupled_fast, ocean
 from thermo import calc_thermo
 from track import env_wind
@@ -22,6 +23,10 @@ Driver function to compute zonal and meridional wind monthly mean and
 covariances, potential intensity, GPI, and saturation deficit.
 """
 def compute_downscaling_inputs():
+    if namelist.file_type == 'grib':
+        print('Preprocessing .grib files...')
+        input.preprocess_grib()
+    
     print('Computing monthly mean and variance of environmental wind...')
     s = time.time()
     env_wind.gen_wind_mean_cov()
@@ -106,7 +111,7 @@ def run_tracks(year, n_tracks, b):
     ds_wnd = xr.open_dataset(fn_wnd_stat)
     for i in range(12):
         dt_month = datetime.datetime(year, i + 1, 15)
-        ds_dt_month = input.convert_from_datetime(ds_wnd, [dt_month])[0]
+        ds_dt_month = input.convert_from_datetime(ds_wnd, [dt_month])[0].astype('datetime64[ns]')
         vpot_month = np.nan_to_num(vpot.interp(time = ds_dt_month).data, 0)
         rh_mid_month = rh_mid.interp(time = ds_dt_month).data
         chi_month = chi.interp(time = ds_dt_month).data
@@ -220,14 +225,18 @@ def run_downscaling(basin_id):
     yearS = namelist.start_year
     yearE = namelist.end_year
 
-    lazy_results = []; f_args = [];
-    for yr in range(yearS, yearE+1):
-        lazy_result = dask.delayed(run_tracks)(yr, n_tracks, b)
-        f_args.append((yr, n_tracks, b))
-        lazy_results.append(lazy_result)
-
-    s = time.time()
-    out = dask.compute(*lazy_results, scheduler = 'processes', num_workers = n_procs)
+    cl_args = {'n_workers': namelist.n_procs,
+               'processes': True,
+               'threads_per_worker': 1}
+    with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+        lazy_results = []
+        f_args = []
+        for yr in range(yearS, yearE+1):
+            lazy_result = dask.delayed(run_tracks)(yr, n_tracks, b)
+            f_args.append((yr, n_tracks, b))
+            lazy_results.append(lazy_result)
+        s = time.time()
+        out = dask.compute(*lazy_results)
 
     # Process the output and save as a netCDF file.
     tc_lon = np.concatenate([x[0] for x in out], axis = 0)
@@ -267,4 +276,3 @@ def run_downscaling(basin_id):
     fn_trk_out = fn_tracks_duplicates(get_fn_tracks(b))
     ds.to_netcdf(fn_trk_out, mode = 'w')
     print('Saved %s' % fn_trk_out)
-    print(time.time() - s)

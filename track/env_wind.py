@@ -5,6 +5,7 @@ import os
 import xarray as xr
 
 import namelist
+from dask.distributed import LocalCluster, Client
 from util import input
 
 """
@@ -90,12 +91,16 @@ def gen_wind_mean_cov():
     fns_ua = input._glob_prefix(input.get_u_key())
     fns_va = input._glob_prefix(input.get_v_key())
 
+    cl_args = {'n_workers': namelist.n_procs,
+               'processes': True,
+               'threads_per_worker': 1}
     lazy_results = []
-    for i in range(min(len(fns_ua), len(fns_va))):
-        lazy_result = dask.delayed(wnd_stat_wrapper)((fns_ua[i], fns_va[i]))
-        lazy_results.append(lazy_result)
-    out = dask.compute(*lazy_results)
-    out_fns = [x for x in out if x is not None]
+    with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+        for i in range(min(len(fns_ua), len(fns_va))):
+            lazy_result = dask.delayed(wnd_stat_wrapper)((fns_ua[i], fns_va[i]))
+            lazy_results.append(lazy_result)
+        out = dask.compute(*lazy_results)
+        out_fns = [x for x in out if x is not None]
 
     # Combine all intermediate files into one dataset, and delete
     ds = input._open_fns(out_fns)
@@ -155,7 +160,7 @@ def wnd_stat_wrapper(args):
                           dims = ['time', 'stat', 'lat', 'lon'],
                           coords = dict(lon = ("lon", ds_ua[input.get_lon_key()].data),
                                         lat = ("lat", ds_ua[input.get_lat_key()].data),
-                                        time = ("time", input.convert_from_datetime(ds_ua, t_months))))
+                                        time = ("time", input.convert_from_datetime(ds_ua, t_months).astype('datetime64[ns]'))))
     ds_wnd = da_wnd.to_dataset(name='wnd_stats')
     fn_ds_wnd = '%s/env_wnd_%s_p%d%02d_%d%02d.nc' % (namelist.output_directory, namelist.exp_prefix,
                                                      t_months[0].year, t_months[0].month,
