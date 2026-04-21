@@ -34,8 +34,8 @@ var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
                     'lvl': 'plev', 'lon': 'lon', 'lat': 'lat'}}
 
 ########################### Parallelism Parameters ##########################
-use_dask = False
-n_procs = 16              # number of processes to use in dask
+use_dask = True
+n_procs = 12              # number of processes to use in dask
 
 ############################ TC Risk Parameters #############################
 """
@@ -50,8 +50,8 @@ end_month = 12                        # month of end_year to stop downscaling
 These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
-total_track_time_days = 15            # total time to integrate tracks, days
-tracks_per_year = 20                  # total number of tracks to simulate per year
+total_track_time_days = 13            # total time to integrate tracks, days
+tracks_per_year = 500                  # total number of tracks to simulate per year
 
 """
 These parameters configure thermodynamics and thermodynamic constants.
@@ -82,7 +82,7 @@ m_alpha = [0.0025, -0.0025]           # change of each coefficient per unit stor
 alpha_max = [0.41, 0.78]              # maximum value of each steering coefficient (coupled track only)
 alpha_min = [0.22, 0.59]              # minimum value of each steering coefficient (coupled track only)
 u_beta = -1.0                         # zonal beta drift, m/s
-v_beta = 2.5                          # meridional beta drift, m/s
+v_beta = 2.                          # meridional beta drift, m/s
 T_days = 20                           # period of the fourier series, days
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
 seed_v_2d_threshold_ms = 6.5          # seed v threshold after 2 days, m/s
@@ -95,7 +95,7 @@ log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
 lat_vort_fac = 2                      # sets where vorticity threshold decays toward equator
 lat_vort_power = {'NA': 6, 'EP': 6,   # power decay towards the equator
-                  'WP': 3.5, 'AU': 6,
+                  'WP': 3.5, 'AU': 8,
                   'SI': 3, 'SP': 7, 'NI': 2.5}
 # Initial m based on large-scale relative humidity
 f_mInit = lambda rh: 0.20 / (1 + np.exp(-(rh - 0.55) * 10)) + 0.125

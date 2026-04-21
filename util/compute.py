@@ -3,10 +3,11 @@
 """
 @author: jzlin@mit.edu
 """
+import os
 import dask
 import datetime
 import numpy as np
-import os
+import pandas as pd
 import xarray as xr
 import time
 
@@ -125,6 +126,8 @@ def run_tracks(year, n_tracks, b):
     # To randomly seed in both space and time, load data for each month in the year.
     cpl_fast = [0] * 12
     m_init_fx = [0] * 12
+    tcgp_month = [0] * 12
+    tcgp_init_fx = [0] * 12
     n_seeds = np.zeros((len(basin_ids), 12))
     T_s = namelist.total_track_time_days * 24 * 60 * 60     # total time to run tracks
     fn_wnd_stat = env_wind.get_env_wnd_fn()
@@ -160,9 +163,14 @@ def run_tracks(year, n_tracks, b):
     tc_v = np.full((n_tracks, n_steps), np.nan)
     tc_m = np.full((n_tracks, n_steps), np.nan)
     tc_vmax = np.full((n_tracks, n_steps), np.nan)
+    tc_rmax = np.full((n_tracks, n_steps), np.nan)
+    tc_r34 = np.full((n_tracks, n_steps), np.nan)
     tc_env_wnds = np.full((n_tracks, n_steps, cpl_fast[0].nWLvl), np.nan)
     tc_month = np.full(n_tracks, np.nan)
     tc_basin = np.full(n_tracks, "", dtype = 'U2')
+
+    seeds_df_list = []
+    tcs_df_list = []
 
     while nt < n_tracks:
         seed_passed = False
@@ -178,7 +186,7 @@ def run_tracks(year, n_tracks, b):
             gen_lat = np.arcsin(np.random.uniform(y_min, y_max, 1)[0]) * 180 / np.pi
             while f_b.ev(gen_lon, gen_lat) < 1e-2:
                 gen_lon = np.random.uniform(b_bounds[0], b_bounds[2], 1)[0]
-                gen_lat = np.random.uniform(b_bounds[1], b_bounds[3], 1)[0]
+                gen_lat = np.arcsin(np.random.uniform(y_min, y_max, 1)[0]) * 180 / np.pi
 
             # Randomly seed the month.
             month_seed = np.random.randint(1, 13)
@@ -198,6 +206,8 @@ def run_tracks(year, n_tracks, b):
             rand_lowlat = np.random.uniform(0, 1, 1)[0]
             if (np.nanmax(basin_val) > 1e-3) and (rand_lowlat < prob_lowlat):
                 n_seeds[basin_idx, month_seed-1] += 1
+                seed_df = pd.DataFrame([[gen_lat,gen_lon,month_seed,year]],columns=['lat','lon','month','year'])
+                seeds_df_list.append(seed_df)
                 if (pi_gen > 35):
                     seed_passed = True
 
@@ -261,6 +271,14 @@ def run_tracks(year, n_tracks, b):
                 tc_month[nt] = month_seed
                 tc_basin[nt] = basin_ids[basin_idx]
                 nt += 1
+
+        else:
+            tcs_df = pd.DataFrame([[gen_lat,gen_lon,month_seed,year]],columns=['lat','lon','month','year'])
+            tcs_df_list.append(tcs_df)
+
+    seed_tries = pd.concat(seeds_df_list)
+    tc_tries = pd.concat(tcs_df_list)
+
     return((tc_lon, tc_lat, tc_v, tc_m, tc_vmax, tc_rmax, tc_r34, tc_env_wnds, tc_month, tc_basin, n_seeds, seed_tries, tc_tries)) 
 
 """
@@ -289,6 +307,7 @@ def run_downscaling(basin_id):
             
             out = dask.compute(*lazy_results)
     else:
+        f_args = [(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
         out = [run_tracks(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
 
     # Process the output and save as a netCDF file.
