@@ -13,6 +13,23 @@ import numpy as np
 import xarray as xr
 import namelist
 
+def get_time_var(ds):
+    """Return the name of the time coordinate/dimension in ds."""
+    for candidate in ['time', 'valid_time']:
+        if candidate in ds.coords or candidate in ds.dims:
+            return candidate
+    for name in list(ds.coords) + list(ds.dims):
+        if 'time' in name.lower():
+            return name
+    raise KeyError("No time coordinate found in dataset")
+
+def normalize_time(ds):
+    """Rename the time coordinate to 'time' if it has a different name."""
+    tvar = get_time_var(ds)
+    if tvar != 'time':
+        ds = ds.rename({tvar: 'time'})
+    return ds
+
 def preprocess_grib():
     fns = glob.glob('%s/**/*%s*.grib' % (namelist.base_directory, namelist.exp_prefix), recursive = True)
     for fn in fns:
@@ -28,9 +45,12 @@ def _open_fns(fns):
     if len(fns) == 1:
         ds = xr.open_dataset(fns[0])
     else:
-        ds = xr.open_mfdataset(fns, concat_dim = "time", combine='nested',
+        ds0 = xr.open_dataset(fns[0])
+        tvar = get_time_var(ds0)
+        ds0.close()
+        ds = xr.open_mfdataset(fns, concat_dim=tvar, combine='nested',
                                data_vars="minimal", drop_variables=['nbdate'])
-    return ds
+    return normalize_time(ds)
 
 def _glob_prefix(var_prefix):
     if namelist.file_type == 'netcdf':
@@ -50,7 +70,7 @@ def _find_in_timerange(fns, ct_start, ct_end = None):
     fns_multi = []
     for fn in fns:
         ds = xr.open_dataset(fn)
-        time = ds['time']                      # time
+        time = ds[get_time_var(ds)]
         if ct_start is not None and ct_end is None:
             if ((ct_start >= time[0]) & (ct_start <= time[-1])):
                 fns_multi.append(fn)
@@ -125,15 +145,16 @@ def _load_var_daily(fn):
     # Daily variables are large cannot be loaded into memory as easily.
     # So this is an internal function that loads a file directly.
     ds = xr.open_dataset(fn)
-    return ds
+    return normalize_time(ds)
 
 def convert_from_datetime(ds, dts):
     # Convert the datetime array dts to the timestamps used by ds.
     # Only supports np.datetime64 or cftime.DatetimeNoLeap to datetimes.
     # Necessary to convert between non-standard calendars (like no leap).
-    if isinstance(np.array(ds['time'])[0], np.datetime64):
+    tvar = get_time_var(ds)
+    if isinstance(np.array(ds[tvar])[0], np.datetime64):
         adt = np.array([np.datetime64(str(x)) for x in np.array(dts)])
-    elif isinstance(np.array(ds['time'])[0], cftime.DatetimeNoLeap):
+    elif isinstance(np.array(ds[tvar])[0], cftime.DatetimeNoLeap):
         adt = np.array([cftime.DatetimeNoLeap(x.year, x.month, x.day, x.hour) for x in np.array(dts)])
     else:
         raise Exception("Did not understand type of time.")
@@ -143,9 +164,10 @@ def convert_to_datetime(ds, dts):
     # Convert the timestamps types of ds to datetime timestamps.
     # Only supports np.datetime64 or cftime.DatetimeNoLeap to datetimes.
     # Necessary to convert between non-standard calendars (like no leap).
-    if isinstance(np.array(ds['time'])[0], np.datetime64):
+    tvar = get_time_var(ds)
+    if isinstance(np.array(ds[tvar])[0], np.datetime64):
         adt = np.array(dts.astype('datetime64[s]').tolist())
-    elif isinstance(np.array(ds['time'])[0], cftime.DatetimeNoLeap):
+    elif isinstance(np.array(ds[tvar])[0], cftime.DatetimeNoLeap):
         adt = np.array([datetime.datetime(x.year, x.month, x.day, x.hour) for x in np.array(dts)])
     else:
         raise Exception("Did not understand type of time.")

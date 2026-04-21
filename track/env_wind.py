@@ -131,10 +131,6 @@ def wnd_stat_wrapper(args):
     ua = ds_ua[input.get_u_key()]
     va = ds_va[input.get_v_key()]
 
-    time_var = [v for v in list(ds_ua.data_vars) if 'time' in v][0]
-    ds_ua.rename({time_var,'time'})
-    ds_va.rename({time_var,'time'})
-    
     # Find all of the months to average over.
     dts = input.convert_to_datetime(ds_ua, ds_ua['time'].values)
     dt_start = max([dt_start, dts[0]])
