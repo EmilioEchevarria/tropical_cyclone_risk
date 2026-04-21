@@ -39,6 +39,12 @@ def compute_downscaling_inputs():
     e = time.time()
     print('Time Elapsed: %f s' % (e - s))
 
+    print("Computing genesis parameter")
+    s = time.time()
+    calc_genesis.gen_genesis()
+    e = time.time()
+    print('Time Elapsed: %f s' % (e - s))
+
 """
 Returns the name of the file containing downscaled tropical cyclone tracks.
 """
@@ -69,7 +75,7 @@ described by "b" (can be global), in the year.
 def run_tracks(year, n_tracks, b):
     # Load thermodynamic and ocean variables.
     fn_th = calc_thermo.get_fn_thermo()
-    ds = xr.open_dataset(fn_th)
+    ds = xr.open_dataset(fn_th).sortby("lat", ascending=True).sel(lat=slice(-74,74))
     dt_year_start = datetime.datetime(year-1, 12, 31)
     dt_year_end = datetime.datetime(year, 12, 31)
     dt_bounds = input.convert_from_datetime(ds, [dt_year_start, dt_year_end])
@@ -87,6 +93,19 @@ def run_tracks(year, n_tracks, b):
         rh_mid = rh_mid.reindex({'lat': lat[::-1]})
         chi = chi.reindex({'lat': lat[::-1]})
         lat = lat[::-1]
+
+    # Load genesis parameter:
+    fn_tcgp = calc_genesis.get_fn_tcgp()
+    gds = xr.open_dataset(fn_tcgp)
+    gds = gds.sel(time=slice(dt_bounds[0], dt_bounds[1])).load()
+    glon = gds['lon'].data
+    glat = gds['lat'].data
+    gds['tcgp'] = gds['tcgp']/np.nanpercentile(gds['tcgp'].values.flatten(), 99.9)
+    tcgp = gds['tcgp']
+
+    if (glat[0] - glat[1]) > 0:
+        tcgp = tcgp.reindex({'lat': glat[::-1]})
+        glat = glat[::-1]
 
     # Load the basin bounds and genesis points.
     basin_ids = np.array(sorted([k for k in namelist.basin_bounds if k != 'GL']))
@@ -108,7 +127,8 @@ def run_tracks(year, n_tracks, b):
     n_seeds = np.zeros((len(basin_ids), 12))
     T_s = namelist.total_track_time_days * 24 * 60 * 60     # total time to run tracks
     fn_wnd_stat = env_wind.get_env_wnd_fn()
-    ds_wnd = xr.open_dataset(fn_wnd_stat)
+    ds_wnd = xr.open_dataset(fn_wnd_stat).sortby("lat", ascending=True).sel(lat=slice(-74,74))
+
     for i in range(12):
         dt_month = datetime.datetime(year, i + 1, 15)
         ds_dt_month = input.convert_from_datetime(ds_wnd, [dt_month])[0].astype('datetime64[ns]')
@@ -125,6 +145,12 @@ def run_tracks(year, n_tracks, b):
                                                 namelist.output_interval_s, T_s)
         cpl_fast[i].init_fields(lon, lat, chi_month, vpot_month, mld_month, strat_month)
 
+        gds_dt_month = input.convert_from_datetime(gds, [dt_month])[0]
+        tcgp_month[i] = np.nan_to_num(tcgp.interp(time=gds_dt_month).data, 0)
+        tcgp_init_fx[i] = mat.interp2_fx(tcgp['lon'], tcgp['lat'], tcgp_month[i])
+
+    max_tcgp_month = np.nanmax(tcgp_month)
+
     # Output vectors.
     nt = 0
     n_steps = cpl_fast[0].total_steps
@@ -136,6 +162,7 @@ def run_tracks(year, n_tracks, b):
     tc_env_wnds = np.full((n_tracks, n_steps, cpl_fast[0].nWLvl), np.nan)
     tc_month = np.full(n_tracks, np.nan)
     tc_basin = np.full(n_tracks, "", dtype = 'U2')
+
     while nt < n_tracks:
         seed_passed = False
         while not seed_passed:
@@ -191,7 +218,25 @@ def run_tracks(year, n_tracks, b):
             # The TC must also reach the genesis threshold during it's entire lifetime.
             v_thresh = namelist.seed_v_threshold_ms
             v_thresh_2d = np.interp(2*24*60*60, res.t, v_track.flatten())
-            is_tc = np.logical_and(np.any(v_track >= v_thresh), v_thresh_2d >= namelist.seed_v_2d_threshold_ms)
+
+            # TCGP check for genesis location
+            genesis_v_thresh = 19.88  # 17/0.88 m/s — tropical storm threshold
+            genesis_idx = np.where(v_track.flatten() >= genesis_v_thresh)[0]
+            tcgp_passed = False
+            if len(genesis_idx) > 2:
+                gi = genesis_idx[0]
+                genesis_lon = track_lon[gi]
+                genesis_lat = track_lat[gi]
+                tcgp_genesis = tcgp_init_fx[month_seed - 1].ev(genesis_lon, genesis_lat)
+                rand_tcgp = np.random.uniform(0, max_tcgp_month, 1)[0]
+                tcgp_passed = (rand_tcgp < tcgp_genesis)
+            
+            #is_tc = np.logical_and(np.any(v_track >= v_thresh), v_thresh_2d >= namelist.seed_v_2d_threshold_ms)
+            is_tc = np.logical_and.reduce([
+                np.any(v_track >= v_thresh),
+                v_thresh_2d >= namelist.seed_v_2d_threshold_ms,
+                np.min(np.abs(track_lat)) > 2.0,
+                tcgp_passed])
 
         if is_tc:
             n_time = len(track_lon)
@@ -207,12 +252,15 @@ def run_tracks(year, n_tracks, b):
                 tc_env_wnds[nt, i, :] = fast._env_winds(track_lon[i], track_lat[i], fast.t_s[i])     
             vmax = tc_wind.axi_to_max_wind(track_lon, track_lat, fast.dt_track,
                                            v_track, tc_env_wnds[nt, 0:n_time, :])
+            rmax, r34 = tc_wind.wind_radii(track_lat, vmax)
             if np.nanmax(vmax) >= namelist.seed_vmax_threshold_ms:
                 tc_vmax[nt, 0:n_time] = vmax
+                tc_rmax[nt, 0:n_time] = rmax
+                tc_r34[nt, 0:n_time] = r34
                 tc_month[nt] = month_seed
                 tc_basin[nt] = basin_ids[basin_idx]
                 nt += 1
-    return((tc_lon, tc_lat, tc_v, tc_m, tc_vmax, tc_env_wnds, tc_month, tc_basin, n_seeds))
+    return((tc_lon, tc_lat, tc_v, tc_m, tc_vmax, tc_rmax, tc_r34, tc_env_wnds, tc_month, tc_basin, n_seeds, seed_tries, tc_tries)) 
 
 """
 Runs the downscaling model in basin "basin_id" according to the
@@ -244,11 +292,16 @@ def run_downscaling(basin_id):
     tc_v = np.concatenate([x[2] for x in out], axis = 0)
     tc_m = np.concatenate([x[3] for x in out], axis = 0)
     tc_vmax = np.concatenate([x[4] for x in out], axis = 0)
-    tc_env_wnds = np.concatenate([x[5] for x in out], axis = 0)
-    tc_months = np.concatenate([x[6] for x in out], axis = 0)
-    tc_basins = np.concatenate([x[7] for x in out], axis = 0)
+    tc_rmax = np.concatenate([x[5] for x in out], axis = 0)
+    tc_r34 = np.concatenate([x[6] for x in out], axis = 0)
+    tc_env_wnds = np.concatenate([x[7] for x in out], axis = 0)
+    tc_months = np.concatenate([x[8] for x in out], axis = 0)
+    tc_basins = np.concatenate([x[9] for x in out], axis = 0)
     tc_years = np.concatenate([[i+yearS]*out[i][0].shape[0] for i in range(len(out))], axis = 0)
-    n_seeds = np.array([x[8] for x in out])
+    n_seeds = np.array([x[10] for x in out])
+
+    seed_tries = pd.concat([x[11] for x in out], axis = 0)
+    tc_tries = pd.concat([x[12] for x in out], axis = 0)
 
     total_time_s = namelist.total_track_time_days*24*60*60
     n_steps_output = int(total_time_s / namelist.output_interval_s) + 1
@@ -265,6 +318,8 @@ def run_downscaling(basin_id):
                                      v_trks = (["n_trk", "time"], tc_v),
                                      m_trks = (["n_trk", "time"], tc_m),
                                      vmax_trks = (["n_trk", "time"], tc_vmax),
+                                     rmax_trks = (["n_trk", "time"], tc_rmax),
+                                     r34_trks = (["n_trk", "time"], tc_r34),
                                      tc_month = (["n_trk"], tc_months),
                                      tc_basins = (["n_trk"], tc_basins),                                     
                                      tc_years = (["n_trk"], tc_years),
@@ -274,5 +329,9 @@ def run_downscaling(basin_id):
 
     os.makedirs('%s/%s' % (namelist.base_directory, namelist.exp_name), exist_ok = True)
     fn_trk_out = fn_tracks_duplicates(get_fn_tracks(b))
+
+    seed_tries.to_csv('%s/%s/seed_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode = 'w')
+    tc_tries.to_csv('%s/%s/tc_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode = 'w')
+
     ds.to_netcdf(fn_trk_out, mode = 'w')
     print('Saved %s' % fn_trk_out)

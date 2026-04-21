@@ -19,3 +19,12 @@ def axi_to_max_wind(track_lon, track_lat, dt_track, tc_v, env_wnds):
     vg = tc_v * np.cos(theta_opt) + V_inc * mag_fac
     tc_vmax = np.sqrt(np.power(ug, 2) + np.power(vg, 2))
     return tc_vmax
+
+# Calculate radius to max wind and radius to gales
+def wind_radii(track_lat, tc_vmax):
+    rmw = np.exp(4.58 - 0.015 * tc_vmax * 1.94384 + 0.005 * np.abs(track_lat) + np.random.normal(scale=0.39))
+    r34 = np.exp(4.08 + 0.008 * tc_vmax * 1.94384 + 0.024 * np.abs(track_lat) + np.random.normal(scale=0.33))
+    # Ensure r34 > rmw and r34 < 350km
+    r34 = np.where(r34 <= rmw, 1.05*rmw, r34)
+    r34 = np.minimum(r34, 350)
+    return (rmw, r34)
