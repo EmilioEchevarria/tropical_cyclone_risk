@@ -91,18 +91,22 @@ def gen_thermo():
                    np.array([x for x in input.convert_to_datetime(ds, ds['time'].values)
                              if x >= ct_bounds[0] and x <= ct_bounds[1]]))
 
-    n_chunks = namelist.n_procs
+    n_chunks = namelist.n_procs if namelist.use_dask else 1
     chunks = np.array_split(ds_times, np.minimum(n_chunks, np.floor(len(ds_times) / 2)))
+    n_chunks = len(chunks)
 
-    cl_args = {'n_workers': namelist.n_procs,
-               'processes': True,
-               'threads_per_worker': 1}
-    lazy_results = []
-    with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
-        for i in range(n_chunks):
-            lazy_result = dask.delayed(compute_thermo)(chunks[i][0], chunks[i][-1])
-            lazy_results.append(lazy_result)
-        out = dask.compute(*lazy_results, scheduler = 'processes', num_workers = n_chunks)
+    if namelist.use_dask:
+        cl_args = {'n_workers': namelist.n_procs,
+                   'processes': True,
+                   'threads_per_worker': 1}
+        lazy_results = []
+        with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+            for i in range(n_chunks):
+                lazy_result = dask.delayed(compute_thermo)(chunks[i][0], chunks[i][-1])
+                lazy_results.append(lazy_result)
+            out = dask.compute(*lazy_results, scheduler = 'processes', num_workers = n_chunks)
+    else:
+        out = [compute_thermo(chunks[i][0], chunks[i][-1]) for i in range(n_chunks)]
 
     # Clean up and process output.
     # Ensure monthly timestamps have middle-of-the-month days.

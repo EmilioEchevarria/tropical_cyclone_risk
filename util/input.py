@@ -24,11 +24,20 @@ def get_time_var(ds):
     raise KeyError("No time coordinate found in dataset")
 
 def normalize_time(ds):
-    """Rename the time coordinate to 'time' if it has a different name."""
+    """Rename the time coordinate to 'time' and decode it if still raw integers."""
     tvar = get_time_var(ds)
     if tvar != 'time':
         ds = ds.rename({tvar: 'time'})
+    if np.issubdtype(ds['time'].dtype, np.integer):
+        ds = xr.decode_cf(ds)
     return ds
+
+def _open_dataset(fn):
+    try:
+        ds = xr.open_dataset(fn, engine='h5netcdf')
+    except Exception:
+        ds = xr.open_dataset(fn, engine='netcdf4')
+    return normalize_time(ds)
 
 def preprocess_grib():
     fns = glob.glob('%s/**/*%s*.grib' % (namelist.base_directory, namelist.exp_prefix), recursive = True)
@@ -43,14 +52,21 @@ def preprocess_grib():
 
 def _open_fns(fns):
     if len(fns) == 1:
-        ds = xr.open_dataset(fns[0])
+        return _open_dataset(fns[0])
     else:
-        ds0 = xr.open_dataset(fns[0])
+        try:
+            ds0 = xr.open_dataset(fns[0], engine='h5netcdf')
+        except Exception:
+            ds0 = xr.open_dataset(fns[0], engine='netcdf4')
         tvar = get_time_var(ds0)
         ds0.close()
-        ds = xr.open_mfdataset(fns, concat_dim=tvar, combine='nested',
-                               data_vars="minimal", drop_variables=['nbdate'])
-    return normalize_time(ds)
+        mf_kwargs = dict(concat_dim=tvar, combine='nested',
+                         data_vars="minimal", drop_variables=['nbdate'])
+        try:
+            ds = xr.open_mfdataset(fns, engine='h5netcdf', **mf_kwargs)
+        except Exception:
+            ds = xr.open_mfdataset(fns, engine='netcdf4', **mf_kwargs)
+        return normalize_time(ds)
 
 def _glob_prefix(var_prefix):
     if namelist.file_type == 'netcdf':
@@ -69,13 +85,22 @@ def _glob_prefix(var_prefix):
 def _find_in_timerange(fns, ct_start, ct_end = None):
     fns_multi = []
     for fn in fns:
-        ds = xr.open_dataset(fn)
-        time = ds[get_time_var(ds)]
+        try:
+            ds = _open_dataset(fn)
+        except Exception as e:
+            print('Warning: could not open %s (%s: %s) — skipping'
+                  % (fn, type(e).__name__, str(e).splitlines()[0]))
+            continue
+        # Use .values to strip attached scalar coords (e.g. ERA5 'number', 'expver')
+        # that would otherwise be broadcast into the comparison.
+        time = ds['time'].values
+        ct_s = np.datetime64(ct_start)
         if ct_start is not None and ct_end is None:
-            if ((ct_start >= time[0]) & (ct_start <= time[-1])):
+            if (time[0] <= ct_s) and (ct_s <= time[-1]):
                 fns_multi.append(fn)
         else:
-            if ((time >= ct_start) & (time <= ct_end)).any():
+            ct_e = np.datetime64(ct_end)
+            if ((time >= ct_s) & (time <= ct_e)).any():
                 fns_multi.append(fn)
         ds.close()
 
@@ -144,7 +169,7 @@ def load_sp_hum(ct_start = None, ct_end = None):
 def _load_var_daily(fn):
     # Daily variables are large cannot be loaded into memory as easily.
     # So this is an internal function that loads a file directly.
-    ds = xr.open_dataset(fn)
+    ds = _open_dataset(fn)
     return normalize_time(ds)
 
 def convert_from_datetime(ds, dts):

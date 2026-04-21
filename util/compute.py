@@ -273,18 +273,22 @@ def run_downscaling(basin_id):
     yearS = namelist.start_year
     yearE = namelist.end_year
 
-    cl_args = {'n_workers': namelist.n_procs,
-               'processes': True,
-               'threads_per_worker': 1}
-    with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
-        lazy_results = []
-        f_args = []
-        for yr in range(yearS, yearE+1):
-            lazy_result = dask.delayed(run_tracks)(yr, n_tracks, b)
-            f_args.append((yr, n_tracks, b))
-            lazy_results.append(lazy_result)
-        s = time.time()
-        out = dask.compute(*lazy_results)
+    s = time.time()
+    if namelist.use_dask:
+        cl_args = {'n_workers': namelist.n_procs,
+                   'processes': True,
+                   'threads_per_worker': 1}
+        with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+            lazy_results = []
+            f_args = []
+            for yr in range(yearS, yearE+1):
+                lazy_result = dask.delayed(run_tracks)(yr, n_tracks, b)
+                f_args.append((yr, n_tracks, b))
+                lazy_results.append(lazy_result)
+            
+            out = dask.compute(*lazy_results)
+    else:
+        out = [run_tracks(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
 
     # Process the output and save as a netCDF file.
     tc_lon = np.concatenate([x[0] for x in out], axis = 0)

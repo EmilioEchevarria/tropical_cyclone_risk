@@ -28,12 +28,13 @@ file_type = 'netcdf'
 # 'v' is meridional wind (daily)
 var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
                      'sp_hum': 'q', 'u': 'u', 'v': 'v',
-                     'lvl': 'isobaricInhPa', 'lon': 'longitude', 'lat': 'latitude'},
+                     'lvl': 'pressure_level', 'lon': 'longitude', 'lat': 'latitude'},
             'GCM': {'sst': 'tos', 'mslp': 'psl', 'temp': 'ta',
                     'sp_hum': 'hus', 'u': 'ua', 'v': 'va',
                     'lvl': 'plev', 'lon': 'lon', 'lat': 'lat'}}
 
 ########################### Parallelism Parameters ##########################
+use_dask = False
 n_procs = 16              # number of processes to use in dask
 
 ############################ TC Risk Parameters #############################
@@ -42,7 +43,7 @@ These parameters configure the dates for the TC-risk model.
 """
 start_year = 1981                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 2025                       # year to stop downscaling
+end_year = 1981                       # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """

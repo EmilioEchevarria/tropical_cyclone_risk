@@ -88,23 +88,27 @@ def gen_wind_mean_cov():
 
     # Since the operations are massively parallelized, we want individual
     # control over the files being opened.
-    fns_ua = input._glob_prefix(input.get_u_key())
-    fns_va = input._glob_prefix(input.get_v_key())
-
-    cl_args = {'n_workers': namelist.n_procs,
-               'processes': True,
-               'threads_per_worker': 1}
-    lazy_results = []
-    with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
-        for i in range(min(len(fns_ua), len(fns_va))):
-            lazy_result = dask.delayed(wnd_stat_wrapper)((fns_ua[i], fns_va[i]))
-            lazy_results.append(lazy_result)
-        out = dask.compute(*lazy_results)
-        out_fns = [x for x in out if x is not None]
+    dt_start, dt_end = input.get_bounding_times()
+    fns_ua = input._find_in_timerange(input._glob_prefix(input.get_u_key()), dt_start, dt_end)
+    fns_va = input._find_in_timerange(input._glob_prefix(input.get_v_key()), dt_start, dt_end) 
+    n_files = min(len(fns_ua), len(fns_va))
+    if namelist.use_dask:
+        cl_args = {'n_workers': namelist.n_procs,
+                    'processes': True,
+                    'threads_per_worker': 1}
+        lazy_results = []
+        with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+            for i in range(min(len(fns_ua), len(fns_va))):
+                lazy_result = dask.delayed(wnd_stat_wrapper)((fns_ua[i], fns_va[i]))
+                lazy_results.append(lazy_result)
+            out = dask.compute(*lazy_results)
+    else:
+        out = [wnd_stat_wrapper((fns_ua[i], fns_va[i])) for i in range(n_files)]
+    out_fns = [x for x in out if x is not None]
 
     # Combine all intermediate files into one dataset, and delete
     ds = input._open_fns(out_fns)
-    da = ds['wnd_stats']
+    da = ds['wnd_stats'].load()
 
     var_Mean = wind_mean_vector_names()
     var_Var = sum([[x for x in y if len(x) > 0] for y in wind_cov_matrix_names()], [])
@@ -113,6 +117,7 @@ def gen_wind_mean_cov():
     for i in range(len(var_names)):
         var_dict[var_names[i]] = da[:, i, :, :].rename(var_names[i])
     ds.close()
+    del ds, da
 
     ds_e = xr.Dataset(data_vars = var_dict)
     ds_e.to_netcdf(fn_out, mode = 'w')
