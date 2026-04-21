@@ -52,11 +52,12 @@ def _xi(ds: xr.Dataset):
 
     R = mpconst.earth_avg_radius
     omega = mpconst.earth_avg_angular_vel
+    ua700 = ds['ua700_Mean'] * units('m/s')
+    va700 = ds['va700_Mean'] * units('m/s')
+    ua850 = ds['ua850_Mean'] * units('m/s')
+    va850 = ds['va850_Mean'] * units('m/s')
 
-    avrt700 = mpcalc.absolute_vorticity(
-        ds['ua700_Mean'],
-        ds['va700_Mean']
-    )
+    avrt700 = mpcalc.absolute_vorticity(ua700, va700)
     dedy, _ = mpcalc.gradient(
         avrt700, axes=[
             input.get_lat_key(),
@@ -66,10 +67,7 @@ def _xi(ds: xr.Dataset):
     #beta = xr.where(dedy < beta_floor, beta_floor, dedy)
     beta_floor = xr.full_like(dedy, 5e-12) * (1 / (units.meter * units.second))
     beta = xr.where(dedy < beta_floor, beta_floor, dedy)
-    avrt850 = mpcalc.absolute_vorticity(
-        ds['ua850_Mean'],
-        ds['va850_Mean']
-    )
+    avrt850 = mpcalc.absolute_vorticity(ua850, va850)
     xi = np.abs(avrt850) / (beta * (R/(2 * omega)))
     xi = mpcalc.smooth_n_point(xi, 9, 2)
     return xi.metpy.dequantify()
@@ -84,11 +82,11 @@ def _shear(ds: xr.Dataset):
     :return: _description_
     :rtype: _type_
     """
-    ua200 = ds['ua250_Mean']
-    va200 = ds['va250_Mean']
-    ua850 = ds['ua850_Mean']
-    va850 = ds['va850_Mean']
+    ua250 = ds['ua250_Mean'] * units('m/s')
+    va250 = ds['va250_Mean'] * units('m/s')
+    ua850 = ds['ua850_Mean'] * units('m/s')
+    va850 = ds['va850_Mean'] * units('m/s')
 
-    shear = np.sqrt((ua200 - ua850)**2 + (va200 - va850)**2)
+    shear = np.sqrt((ua250 - ua850)**2 + (va250 - va850)**2)
     shear = mpcalc.smooth_n_point(shear, 9, 2)
     return shear.metpy.dequantify()

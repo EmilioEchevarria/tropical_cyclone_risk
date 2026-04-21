@@ -90,14 +90,14 @@ def compute_genesis(dt_start, dt_end):
     fn_th = calc_thermo.get_fn_thermo()
     fn_wnd_stat = env_wind.get_env_wnd_fn()
 
-    thermo_ds = xr.open_dataset(fn_th).sel(time=slice(dt_start, dt_end)).sortby("lat", ascending=True).sel(lat=slice(-74,74))
-    wnd_ds = xr.open_dataset(fn_wnd_stat).sel(time=slice(dt_start, dt_end)).sortby("lat", ascending=True).sel(lat=slice(-74,74))
+    thermo_ds = xr.open_dataset(fn_th).sel(time=slice(dt_start, dt_end)).sortby("lat", ascending=True).sel(lat=slice(-65,65))
+    wnd_ds = xr.open_dataset(fn_wnd_stat).sel(time=slice(dt_start, dt_end)).sortby("lat", ascending=True).sel(lat=slice(-65,65))
     
     xi = genesis._xi(wnd_ds)
     shear = genesis._shear(wnd_ds)
     vpot = thermo_ds['vmax'].sel(time=slice(dt_start, dt_end))
-    ds_ta = input.load_temp(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-74,74)).load()
-    ds_hus = input.load_sp_hum(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-74,74)).load()
+    ds_ta = input.load_temp(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-65,65)).load()
+    ds_hus = input.load_sp_hum(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-65,65)).load()
 
     ta = ds_ta[input.get_temp_key()]
     hus = ds_hus[input.get_sp_hum_key()]
@@ -118,6 +118,13 @@ def compute_genesis(dt_start, dt_end):
     p_midlevel_Pa = float(lvl_mid) * 100 if lvl_mid.units in ['millibars', 'hPa'] else float(lvl_mid)
 
     rh_mid = thermo.conv_q_to_rh(ta_midlevel, hus_midlevel, p_midlevel_Pa)
+
+    print("dt_start:", dt_start, "dt_end:", dt_end)
+    print("vpot shape:", vpot.shape, "times:", vpot.time.values)
+    print("xi shape:", xi.shape, "times:", xi.time.values)
+    print("shear shape:", shear.shape, "times:", shear.time.values)
+    print("rh_mid shape:", np.shape(rh_mid))
+    
     tcgp = genesis._tcgp(vpot, xi, rh_mid, shear)
     
     return tcgp
@@ -130,7 +137,7 @@ def gen_genesis():
     # Load datasets metadata. Since SST is split into multiple files and can
     # cause parallel reads with open_mfdataset to hang, save as a single file.
     dt_start, dt_end = input.get_bounding_times()
-    ds = input.load_mslp().sortby("latitude", ascending=True).sel(latitude=slice(-74,74))
+    ds = input.load_mslp().sortby("latitude", ascending=True).sel(latitude=slice(-65,65))
 
     ct_bounds = [dt_start, dt_end]
     ds_times = input.convert_from_datetime(
@@ -145,19 +152,9 @@ def gen_genesis():
     )
 
     n_chunks = namelist.n_procs
-    scheduler = namelist.scheduler
-
-    # chunks = np.array_split(ds_times, np.minimum(n_chunks, np.floor(len(ds_times) / 2)))
-    # print('CHUNKS = ', chunks)
-    # lazy_results = []
-    # for i in range(len(chunks)):
-    #     lazy_result = dask.delayed(compute_genesis)(chunks[i][0], chunks[i][-1])
-    #     lazy_results.append(lazy_result)
-    # out = dask.compute(*lazy_results,
-    #                    scheduler=scheduler,
-    #                    num_workers=n_chunks)
-
     chunks = np.array_split(ds_times, np.minimum(n_chunks, np.floor(len(ds_times) / 2)))
+    n_chunks = len(chunks)
+
     # 2. Run the loop manually (Serial processing)
     out = []
     for i, chunk in enumerate(chunks):

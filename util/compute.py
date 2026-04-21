@@ -17,6 +17,7 @@ from thermo import calc_thermo
 from track import env_wind
 from wind import tc_wind
 from util import basins, input, mat
+from genesis import calc_genesis
 
 """
 Driver function to compute zonal and meridional wind monthly mean and
@@ -75,7 +76,7 @@ described by "b" (can be global), in the year.
 def run_tracks(year, n_tracks, b):
     # Load thermodynamic and ocean variables.
     fn_th = calc_thermo.get_fn_thermo()
-    ds = xr.open_dataset(fn_th).sortby("lat", ascending=True).sel(lat=slice(-74,74))
+    ds = xr.open_dataset(fn_th).sortby("lat", ascending=True).sel(lat=slice(-65,65))
     dt_year_start = datetime.datetime(year-1, 12, 31)
     dt_year_end = datetime.datetime(year, 12, 31)
     dt_bounds = input.convert_from_datetime(ds, [dt_year_start, dt_year_end])
@@ -127,7 +128,7 @@ def run_tracks(year, n_tracks, b):
     n_seeds = np.zeros((len(basin_ids), 12))
     T_s = namelist.total_track_time_days * 24 * 60 * 60     # total time to run tracks
     fn_wnd_stat = env_wind.get_env_wnd_fn()
-    ds_wnd = xr.open_dataset(fn_wnd_stat).sortby("lat", ascending=True).sel(lat=slice(-74,74))
+    ds_wnd = xr.open_dataset(fn_wnd_stat).sortby("lat", ascending=True).sel(lat=slice(-65,65))
 
     for i in range(12):
         dt_month = datetime.datetime(year, i + 1, 15)

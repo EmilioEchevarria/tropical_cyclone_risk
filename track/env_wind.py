@@ -7,6 +7,8 @@ import xarray as xr
 import namelist
 from dask.distributed import LocalCluster, Client
 from util import input
+import metpy.calc as mpcalc
+from metpy.units import units
 
 """
 Returns the name of the file containing environmental wind statistics.
@@ -21,10 +23,17 @@ def get_env_wnd_fn():
 Generates variable names in the monthly mean wind vector.
 """
 def wind_mean_vector_names():
-    p_lvls = namelist.steering_levels
+    p_lvls = namelist.genesis_levels
     var_names = sum([['ua%s' % x, 'va%s' % x] for x in p_lvls], [])
     var_Mean = [x + '_Mean' for x in var_names]
     return var_Mean
+
+"""
+Generate list of variable names for monthly mean gradients.
+"""
+def wind_gradient_names():
+    var_Gradient = ['dudyDLM_Mean', 'dvdxDLM_Mean', 'dzdyDLM_Mean']
+    return var_Gradient
 
 """
 Generates variable names in the monthly wind covariance matrix.
@@ -61,12 +70,14 @@ Read the mean and covariance of the upper/lower level zonal and meridional winds
 def read_env_wnd_fn(fn_wnd_stat, dt_s = None, dt_e = None):
     var_Mean = wind_mean_vector_names()
     var_Var = wind_cov_matrix_names()
+    var_Grad = wind_gradient_names()
 
     if dt_s is None:
-        ds = xr.open_dataset(fn_wnd_stat)
+        ds = xr.open_dataset(fn_wnd_stat).sortby("lat", ascending=True).sel(lat=slice(-65,65))
     else:
-        ds = xr.open_dataset(fn_wnd_stat).sel(time = slice(dt_s, dt_e))
+        ds = xr.open_dataset(fn_wnd_stat).sortby("lat", ascending=True).sel(lat=slice(-65,65)).sel(time = slice(dt_s, dt_e))
     wnd_Mean = [ds[x] for x in var_Mean]
+    wnd_Grad = [ds[x] for x in var_Grad]
     wnd_Cov = [['' for i in range(len(var_Mean))] for j in range(len(var_Mean))]
     for i in range(len(var_Mean)):
         for j in range(len(var_Mean)):
@@ -112,7 +123,7 @@ def gen_wind_mean_cov():
 
     var_Mean = wind_mean_vector_names()
     var_Var = sum([[x for x in y if len(x) > 0] for y in wind_cov_matrix_names()], [])
-    var_names = var_Mean + var_Var
+    var_names = var_Mean + var_Var + ['dudyDLM_Mean', 'dvdxDLM_Mean', 'dzdyDLM_Mean']
     var_dict = dict()
     for i in range(len(var_names)):
         var_dict[var_names[i]] = da[:, i, :, :].rename(var_names[i])
@@ -131,11 +142,11 @@ def wnd_stat_wrapper(args):
     fn_u, fn_v = args
 
     dt_start, dt_end = input.get_bounding_times()
-    ds_ua = input._load_var_daily(fn_u)
-    ds_va = input._load_var_daily(fn_v)
+    ds_ua = input._load_var_daily(fn_u).sortby("latitude", ascending=True).sel(latitude=slice(-65,65))
+    ds_va = input._load_var_daily(fn_v).sortby("latitude", ascending=True).sel(latitude=slice(-65,65))
     ua = ds_ua[input.get_u_key()]
     va = ds_va[input.get_v_key()]
-
+    
     # Find all of the months to average over.
     dts = input.convert_to_datetime(ds_ua, ds_ua['time'].values)
     dt_start = max([dt_start, dts[0]])
@@ -188,10 +199,14 @@ def calc_wnd_stat(ua, va, dt):
                   (input.convert_to_datetime(ua, ua['time'].values) < tEnd))
 
     lvl = ua[input.get_lvl_key()]
-    if lvl.units in ['millibars', 'hPa']:
-        p_upper = 250; p_lower = 850;
-    else:
-        p_upper = 25000; p_lower = 85000;
+    # if lvl.units in ['millibars', 'hPa']:
+    #     p_upper = 250; p_lower = 850;
+    # else:
+    #     p_upper = 25000; p_lower = 85000;
+    p_upper, p_lower = namelist.steering_levels
+    gp_lower, gp_mid, gp_upper = namelist.genesis_levels
+
+    wnd_levels = list(set([p_upper, p_lower, gp_upper, gp_mid, gp_lower]))
 
     # If time step is less than one day, group by day.
     dt_step = (np.timedelta64(1, 'D') - (ua['time'][1] - ua['time'][0]).data) / np.timedelta64(1, 's')
@@ -205,13 +220,20 @@ def calc_wnd_stat(ua, va, dt):
         t_unit = 'time'
 
     # Compute the daily averages
-    ua250_month = ua_month.sel({input.get_lvl_key(): p_upper})
-    va250_month = va_month.sel({input.get_lvl_key(): p_upper})
-    ua850_month = ua_month.sel({input.get_lvl_key(): p_lower})
-    va850_month = va_month.sel({input.get_lvl_key(): p_lower})
+    # ua250_month = ua_month.sel({input.get_lvl_key(): p_upper})
+    # va250_month = va_month.sel({input.get_lvl_key(): p_upper})
+    # ua850_month = ua_month.sel({input.get_lvl_key(): p_lower})
+    # va850_month = va_month.sel({input.get_lvl_key(): p_lower})
 
-    month_wnds = [ua250_month, va250_month,
-                  ua850_month, va850_month]
+    # month_wnds = [ua250_month, va250_month,
+    #               ua850_month, va850_month]
+    month_wnds = []
+    for lev in wnd_levels:
+        ualev_month = ua_month.sel({input.get_lvl_key(): lev}, method='nearest')
+        valev_month = va_month.sel({input.get_lvl_key(): lev}, method='nearest')
+        month_wnds.append(ualev_month)
+        month_wnds.append(valev_month)
+
     month_mean_wnds = [0] * len(month_wnds)
     month_var_wnds = [[np.empty(0) for i in range(len(month_wnds))] for j in range(len(month_wnds))]
     for i in range(len(month_wnds)):
@@ -224,6 +246,18 @@ def calc_wnd_stat(ua, va, dt):
 
     wnd_vars = [[x for x in y if len(x) > 0] for y in month_var_wnds]
     stats = sum(wnd_vars, month_mean_wnds)
+
+    # Calculate deep-layer mean relative voricity:
+    ua850 = ua_month.sel({input.get_lvl_key(): p_lower})
+    va850 = va_month.sel({input.get_lvl_key(): p_lower})
+    ua250 = ua_month.sel({input.get_lvl_key(): p_upper})
+    va250 = va_month.sel({input.get_lvl_key(): p_upper})
+    month_mean_vort = [0] * 3
+    uadlm = 0.8 * ua850 + 0.2 * ua250; vadlm = 0.8 * va850 + 0.2 * va250
+    month_mean_vort[:] = compute_mean_vorticity(uadlm, vadlm)
+
+    stats = stats + month_mean_vort
+
     wnd_stats = np.zeros((len(stats),) + month_mean_wnds[0].shape)
     for i in range(len(stats)):
         wnd_stats[i, :, :] = stats[i]
@@ -236,3 +270,49 @@ def calc_wnd_stat(ua, va, dt):
                 lat=(ua[input.get_lat_key()].values)))
 
     return wnd_stats
+
+def compute_mean_vorticity(ua, va,):
+    """
+    Compute mean vorticity of a wind field
+    :param ua: `xr.DataArray` of u-component of wind
+    :param va: `xr.DataArray` of v-component of wind
+    
+    :return: meridional gradient of zonal wind, zonal gradient of 
+    meridional wind and meridional gradient of vorticity. 
+    
+    These values are scaled by 10^5, 10^5 and 10^11 respectively, 
+    for use in the steering flow calculations. These values are not
+    used in the calculation of the genesis parameter.
+    
+    Wind data are smoothed with two passes of a 9-point smoother before
+    calculating vorticity & gradients.
+    """
+    ua = ua.metpy.quantify()
+    va = va.metpy.quantify()
+    ua = ua * units('m/s')
+    va = va * units('m/s')
+
+    uasm = mpcalc.smooth_n_point(ua, 9, 2)
+    vasm = mpcalc.smooth_n_point(va, 9, 2)
+    
+    vrt = mpcalc.vorticity(uasm, vasm)
+    dzdy, dzdx = mpcalc.gradient(
+        vrt.mean(dim="time"),
+        axes=[input.get_lat_key(),
+              input.get_lon_key()]
+        )
+    dudy, dudx = mpcalc.gradient(
+        uasm.mean(dim="time"),
+        axes=[input.get_lat_key(),
+              input.get_lon_key()]
+        )
+    dvdy, dvdx = mpcalc.gradient(
+        vasm.mean(dim="time"),
+        axes=[input.get_lat_key(),
+              input.get_lon_key()]
+        )
+    dudy = dudy.assign_coords({'level': 850})
+    dvdx = dvdx.assign_coords({'level': 850})
+    dzdy = dzdy.assign_coords({'level': 850})
+
+    return dudy*10e5, dvdx*10e5, dzdy*10e11
