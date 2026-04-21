@@ -99,6 +99,9 @@ def compute_genesis(dt_start, dt_end):
     ds_ta = input.load_temp(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-65,65)).load()
     ds_hus = input.load_sp_hum(dt_start, dt_end).sortby("latitude", ascending=True).sel(latitude=slice(-65,65)).load()
 
+    ds_ta = ds_ta.sel(time=vpot.time.values, method='nearest')
+    ds_hus = ds_hus.sel(time=vpot.time.values, method='nearest')
+
     ta = ds_ta[input.get_temp_key()]
     hus = ds_hus[input.get_sp_hum_key()]
     lvl = ds_ta[input.get_lvl_key()]
@@ -117,14 +120,14 @@ def compute_genesis(dt_start, dt_end):
     
     p_midlevel_Pa = float(lvl_mid) * 100 if lvl_mid.units in ['millibars', 'hPa'] else float(lvl_mid)
 
-    rh_mid = thermo.conv_q_to_rh(ta_midlevel, hus_midlevel, p_midlevel_Pa)
+    rh_mid_data = thermo.conv_q_to_rh(ta_midlevel, hus_midlevel, p_midlevel_Pa)
+    rh_mid = xr.DataArray(
+        data=rh_mid_data,
+        dims=vpot.dims,
+        coords={d: vpot.coords[d] for d in vpot.dims if d in vpot.coords},
+        name='rh_mid',
+        )
 
-    print("dt_start:", dt_start, "dt_end:", dt_end)
-    print("vpot shape:", vpot.shape, "times:", vpot.time.values)
-    print("xi shape:", xi.shape, "times:", xi.time.values)
-    print("shear shape:", shear.shape, "times:", shear.time.values)
-    print("rh_mid shape:", np.shape(rh_mid))
-    
     tcgp = genesis._tcgp(vpot, xi, rh_mid, shear)
     
     return tcgp
@@ -161,13 +164,16 @@ def gen_genesis():
         print(f"Processing chunk {i+1} of {len(chunks)}...")
         # Call the function directly without dask.delayed
         result = compute_genesis(chunk[0], chunk[-1])
+        # Extend chunk end so day=15 monthly thermo/wnd entries fall inside slice.
+        chunk_end = chunk[-1] + np.timedelta64(20, 'D')
+        result = compute_genesis(chunk[0], chunk_end)
         out.append(result)
 
     ds_times = input.convert_from_datetime(
         ds,
         np.array(
             [
-                datetime.datetime(x.year, x.month, 1) #DAY15
+                datetime.datetime(x.year, x.month, 15)
                 for x in [
                     x
                     for x in input.convert_to_datetime(ds, ds["time"].values)

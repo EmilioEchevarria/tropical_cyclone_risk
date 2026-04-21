@@ -20,13 +20,33 @@ def get_env_wnd_fn():
     return(fn_out)
 
 """
+Deterministic ordered list of all levels for which we store mean winds
+(genesis levels + steering levels, preserving genesis_levels order).
+"""
+def _all_wind_levels():
+    lvls = list(namelist.genesis_levels)
+    for x in namelist.steering_levels:
+        if x not in lvls:
+            lvls.append(x)
+    return lvls
+
+"""
 Generates variable names in the monthly mean wind vector.
 """
 def wind_mean_vector_names():
-    p_lvls = namelist.genesis_levels
+    p_lvls = _all_wind_levels()
     var_names = sum([['ua%s' % x, 'va%s' % x] for x in p_lvls], [])
     var_Mean = [x + '_Mean' for x in var_names]
     return var_Mean
+
+"""
+Names of the mean wind components that pair with the covariance matrix
+(steering levels only, covariance is computed only for these).
+"""
+def steering_wind_mean_names():
+    p_lvls = namelist.steering_levels
+    var_names = sum([['ua%s' % x, 'va%s' % x] for x in p_lvls], [])
+    return [x + '_Mean' for x in var_names]
 
 """
 Generate list of variable names for monthly mean gradients.
@@ -57,7 +77,7 @@ which is assumed to be a 2-D array of dimensions (time, nWLvl).
 Used to generate deep-layer shear.
 """
 def deep_layer_winds(env_wnds):
-    var_names = wind_mean_vector_names()
+    var_names = steering_wind_mean_names()
     u250 = env_wnds[:, var_names.index('ua250_Mean')]
     v250 = env_wnds[:, var_names.index('va250_Mean')]
     u850 = env_wnds[:, var_names.index('ua850_Mean')]
@@ -68,7 +88,7 @@ def deep_layer_winds(env_wnds):
 Read the mean and covariance of the upper/lower level zonal and meridional winds.
 """
 def read_env_wnd_fn(fn_wnd_stat, dt_s = None, dt_e = None):
-    var_Mean = wind_mean_vector_names()
+    var_Mean = steering_wind_mean_names()
     var_Var = wind_cov_matrix_names()
     var_Grad = wind_gradient_names()
 
@@ -150,6 +170,7 @@ def wnd_stat_wrapper(args):
     # Find all of the months to average over.
     dts = input.convert_to_datetime(ds_ua, ds_ua['time'].values)
     dt_start = max([dt_start, dts[0]])
+    dt_start = datetime.datetime(dt_start.year, dt_start.month, 15)
     t_months = [dt_start]
     while t_months[-1] <= min([dt_end, dts[-1]]):
         cYear = t_months[-1].year
@@ -204,9 +225,8 @@ def calc_wnd_stat(ua, va, dt):
     # else:
     #     p_upper = 25000; p_lower = 85000;
     p_upper, p_lower = namelist.steering_levels
-    gp_lower, gp_mid, gp_upper = namelist.genesis_levels
+    all_levels = _all_wind_levels()
 
-    wnd_levels = list(set([p_upper, p_lower, gp_upper, gp_mid, gp_lower]))
 
     # If time step is less than one day, group by day.
     dt_step = (np.timedelta64(1, 'D') - (ua['time'][1] - ua['time'][0]).data) / np.timedelta64(1, 's')
@@ -227,36 +247,40 @@ def calc_wnd_stat(ua, va, dt):
 
     # month_wnds = [ua250_month, va250_month,
     #               ua850_month, va850_month]
-    month_wnds = []
-    for lev in wnd_levels:
-        ualev_month = ua_month.sel({input.get_lvl_key(): lev}, method='nearest')
-        valev_month = va_month.sel({input.get_lvl_key(): lev}, method='nearest')
-        month_wnds.append(ualev_month)
-        month_wnds.append(valev_month)
 
-    month_mean_wnds = [0] * len(month_wnds)
-    month_var_wnds = [[np.empty(0) for i in range(len(month_wnds))] for j in range(len(month_wnds))]
-    for i in range(len(month_wnds)):
-        month_mean_wnds[i] = month_wnds[i].mean(dim = t_unit)
+    # Means for ALL levels (order matches wind_mean_vector_names).
+    all_wnds = []
+    for lev in all_levels:
+        all_wnds.append(ua_month.sel({input.get_lvl_key(): lev}, method='nearest'))
+        all_wnds.append(va_month.sel({input.get_lvl_key(): lev}, method='nearest'))
+    month_mean_wnds = [w.mean(dim=t_unit) for w in all_wnds]
+
+    # Covariances for STEERING levels only (order matches wind_cov_matrix_names).
+    steering_wnds = []
+    for lev in namelist.steering_levels:
+        steering_wnds.append(ua_month.sel({input.get_lvl_key(): lev}, method='nearest'))
+        steering_wnds.append(va_month.sel({input.get_lvl_key(): lev}, method='nearest'))
+
+
+    n_s = len(steering_wnds)
+    cov_entries = []
+    for i in range(n_s):
         for j in range(0, i+1):
             if i == j:
-                month_var_wnds[i][j] = month_wnds[i].var(dim = t_unit)
+                cov_entries.append(steering_wnds[i].var(dim=t_unit))
             else:
-                month_var_wnds[i][j] = xr.cov(month_wnds[i], month_wnds[j], dim = t_unit)
+                cov_entries.append(xr.cov(steering_wnds[i], steering_wnds[j], dim=t_unit))
 
-    wnd_vars = [[x for x in y if len(x) > 0] for y in month_var_wnds]
-    stats = sum(wnd_vars, month_mean_wnds)
+    # Deep-layer mean relative vorticity (3 entries).
+    ua_dlm_u = ua_month.sel({input.get_lvl_key(): p_upper})
+    va_dlm_u = va_month.sel({input.get_lvl_key(): p_upper})
+    ua_dlm_l = ua_month.sel({input.get_lvl_key(): p_lower})
+    va_dlm_l = va_month.sel({input.get_lvl_key(): p_lower})
+    uadlm = 0.8 * ua_dlm_l + 0.2 * ua_dlm_u
+    vadlm = 0.8 * va_dlm_l + 0.2 * va_dlm_u
+    month_mean_vort = list(compute_mean_vorticity(uadlm, vadlm))
 
-    # Calculate deep-layer mean relative voricity:
-    ua850 = ua_month.sel({input.get_lvl_key(): p_lower})
-    va850 = va_month.sel({input.get_lvl_key(): p_lower})
-    ua250 = ua_month.sel({input.get_lvl_key(): p_upper})
-    va250 = va_month.sel({input.get_lvl_key(): p_upper})
-    month_mean_vort = [0] * 3
-    uadlm = 0.8 * ua850 + 0.2 * ua250; vadlm = 0.8 * va850 + 0.2 * va250
-    month_mean_vort[:] = compute_mean_vorticity(uadlm, vadlm)
-
-    stats = stats + month_mean_vort
+    stats = month_mean_wnds + cov_entries + month_mean_vort
 
     wnd_stats = np.zeros((len(stats),) + month_mean_wnds[0].shape)
     for i in range(len(stats)):
@@ -287,10 +311,8 @@ def compute_mean_vorticity(ua, va,):
     Wind data are smoothed with two passes of a 9-point smoother before
     calculating vorticity & gradients.
     """
-    ua = ua.metpy.quantify()
-    va = va.metpy.quantify()
-    ua = ua * units('m/s')
-    va = va * units('m/s')
+    ua = ua.metpy.dequantify() * units('m/s')
+    va = va.metpy.dequantify() * units('m/s')
 
     uasm = mpcalc.smooth_n_point(ua, 9, 2)
     vasm = mpcalc.smooth_n_point(va, 9, 2)

@@ -60,7 +60,7 @@ class BetaAdvectionTrack:
         self.nWLvl = self.nLvl * 2
         self.dt_start = dt_start.astype('datetime64[ns]')
         self.basin = basin
-        self.var_names = env_wind.wind_mean_vector_names()
+        self.var_names = env_wind.steering_wind_mean_names()
         self.u_Mean_idxs = np.zeros(self.nLvl).astype(int)
         self.v_Mean_idxs = np.zeros(self.nLvl).astype(int)
         p_lvls = namelist.steering_levels
