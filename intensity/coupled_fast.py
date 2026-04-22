@@ -272,7 +272,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
                 return 0
             else:
                 # stopping point when TC reaches 4 m/s
-                return np.maximum(0, y[2] - 4)
+                return np.maximum(0, y[2] - 6)
         tc_dissipates.terminal = True
 
         # Solve for the intensity.

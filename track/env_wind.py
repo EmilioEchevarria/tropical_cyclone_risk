@@ -151,7 +151,10 @@ def gen_wind_mean_cov():
     del ds, da
 
     ds_e = xr.Dataset(data_vars = var_dict)
-    ds_e.to_netcdf(fn_out, mode = 'w')
+    try:
+        ds_e.to_netcdf(fn_out, mode='w', engine='h5netcdf')
+    except Exception:
+        ds_e.to_netcdf(fn_out, mode='w', engine='netcdf4')
     print('Saved %s' % fn_out)
 
     # Remove intermediate files
@@ -202,7 +205,10 @@ def wnd_stat_wrapper(args):
     fn_ds_wnd = '%s/env_wnd_%s_p%d%02d_%d%02d.nc' % (namelist.output_directory, namelist.exp_prefix,
                                                      t_months[0].year, t_months[0].month,
                                                      t_months[-1].year, t_months[-1].month)
-    ds_wnd.to_netcdf(fn_ds_wnd)
+    try:
+        ds_wnd.to_netcdf(fn_ds_wnd, engine='h5netcdf')
+    except Exception:
+        ds_wnd.to_netcdf(fn_ds_wnd, engine='netcdf4')
     return fn_ds_wnd
 
 """

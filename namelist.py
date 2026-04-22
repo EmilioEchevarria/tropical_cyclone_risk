@@ -43,14 +43,14 @@ These parameters configure the dates for the TC-risk model.
 """
 start_year = 1981                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 1981                       # year to stop downscaling
+end_year = 1982                      # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """
 These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
-total_track_time_days = 13            # total time to integrate tracks, days
+total_track_time_days = 12            # total time to integrate tracks, days
 tracks_per_year = 500                  # total number of tracks to simulate per year
 
 """
@@ -84,8 +84,8 @@ alpha_min = [0.22, 0.59]              # minimum value of each steering coefficie
 u_beta = -1.0                         # zonal beta drift, m/s
 v_beta = 2.                          # meridional beta drift, m/s
 T_days = 20                           # period of the fourier series, days
-seed_v_init_ms = 5                    # initial seed v intensity, m/s
-seed_v_2d_threshold_ms = 6.5          # seed v threshold after 2 days, m/s
+seed_v_init_ms = 6.5                    # initial seed v intensity, m/s
+seed_v_2d_threshold_ms = 7          # seed v threshold after 2 days, m/s
 seed_v_threshold_ms = 15              # seed v threshold over entire lifetime, m/s
 seed_vmax_threshold_ms = 18           # seed vmax threshold over entire lifetime, m/s
 # Atmospheric boundary layer depth (FAST), m

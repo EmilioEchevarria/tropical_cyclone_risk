@@ -85,10 +85,10 @@ class BetaAdvectionTrack:
         # Since xarray interpolation is slow, use our own 2-D interpolation.
         # Only create interpolation functions for the lower trianglular matrix.
         for i in range(len(wnd_Mean)):
-            self.wnd_Mean_Fxs[i] = self._interp_basin_field(wnd_Mean[i].interp(time = self.dt_start))
+            self.wnd_Mean_Fxs[i] = self._interp_basin_field(wnd_Mean[i].sel(time = self.dt_start, method='nearest'))
             for j in range(len(wnd_Mean)):
                 if j <= i:
-                    self.wnd_Cov_Fxs[i][j] = self._interp_basin_field(wnd_Cov[i][j].interp(time = self.dt_start))
+                    self.wnd_Cov_Fxs[i][j] = self._interp_basin_field(wnd_Cov[i][j].sel(time = self.dt_start, method='nearest'))
 
     def interp_wnd_mean_cov(self, clon, clat, ct):
         wnd_mean = np.zeros(self.nWLvl)

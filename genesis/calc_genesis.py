@@ -162,8 +162,6 @@ def gen_genesis():
     out = []
     for i, chunk in enumerate(chunks):
         print(f"Processing chunk {i+1} of {len(chunks)}...")
-        # Call the function directly without dask.delayed
-        result = compute_genesis(chunk[0], chunk[-1])
         # Extend chunk end so day=15 monthly thermo/wnd entries fall inside slice.
         chunk_end = chunk[-1] + np.timedelta64(20, 'D')
         result = compute_genesis(chunk[0], chunk_end)
@@ -186,13 +184,18 @@ def gen_genesis():
     #tcgp = np.concatenate([x[0] for x in out], axis=0)
     tcgp = xr.concat(out, dim='time')
 
+    # Use lat/lon dim names to stay consistent with env_wnd and thermo files.
+    lat_full = ds[input.get_lat_key()].data
+    lat_sorted = np.sort(lat_full)
+    lat_filt = lat_sorted[(lat_sorted >= -65) & (lat_sorted <= 65)]
+
     ds_genesis = xr.Dataset(
         data_vars=dict(
-            tcgp=(["time", "latitude", "longitude"], tcgp.data),
+            tcgp=(["time", "lat", "lon"], tcgp.data),
         ),
         coords=dict(
-            lon=("longitude", ds[input.get_lon_key()].data),
-            lat=("latitude", ds[input.get_lat_key()].data),
+            lon=("lon", ds[input.get_lon_key()].data),
+            lat=("lat", lat_filt),
             time=("time", ds_times),
         ),
     )

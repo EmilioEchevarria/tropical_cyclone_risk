@@ -117,11 +117,23 @@ def gen_thermo():
     vmax = np.concatenate([x[0] for x in out], axis = 0)
     chi = np.concatenate([x[1] for x in out], axis = 0)
     rh_mid = np.concatenate([x[2] for x in out], axis = 0)
+
+    # Filter latitudes to [-65, 65]; no TCs form at higher latitudes.
+    lat_full = ds[input.get_lat_key()].data
+    lat_mask = (lat_full >= -65) & (lat_full <= 65)
+    lat_filt = lat_full[lat_mask]
+    vmax = vmax[:, lat_mask, :]
+    chi = chi[:, lat_mask, :]
+    rh_mid = rh_mid[:, lat_mask, :]
+
     ds_thermo = xr.Dataset(data_vars = dict(vmax = (['time', 'lat', 'lon'], vmax),
                                             chi = (['time', 'lat', 'lon'], chi),
                                             rh_mid = (['time', 'lat', 'lon'], rh_mid)),
                            coords = dict(lon = ("lon", ds[input.get_lon_key()].data),
-                                         lat = ("lat", ds[input.get_lat_key()].data),
+                                         lat = ("lat", lat_filt),
                                          time = ("time", ds_times.astype('datetime64[ns]'))))
-    ds_thermo.to_netcdf(get_fn_thermo())
+    try:
+        ds_thermo.to_netcdf(get_fn_thermo(), engine='h5netcdf')
+    except Exception:
+        ds_thermo.to_netcdf(get_fn_thermo(), engine='netcdf4')
     print('Saved %s' % get_fn_thermo())

@@ -19,6 +19,7 @@ from track import env_wind
 from wind import tc_wind
 from util import basins, input, mat
 from genesis import calc_genesis
+from scipy.ndimage import maximum_filter
 
 """
 Driver function to compute zonal and meridional wind monthly mean and
@@ -70,11 +71,18 @@ def fn_tracks_duplicates(fn_trk):
         f_int += 1
     return fn_trk_out
 
+def _log(msg):
+    print('[%s] [run_tracks pid=%d] %s' % (
+        datetime.datetime.now().strftime('%H:%M:%S'), os.getpid(), msg), flush=True)
+
 """
 Generates "n_tracks" number of tropical cyclone tracks, in basin
 described by "b" (can be global), in the year.
 """
 def run_tracks(year, n_tracks, b):
+    t0 = time.time()
+    _log('year=%d basin=%s — start' % (year, b.basin_id))
+
     # Load thermodynamic and ocean variables.
     fn_th = calc_thermo.get_fn_thermo()
     ds = xr.open_dataset(fn_th).sortby("lat", ascending=True).sel(lat=slice(-65,65))
@@ -128,6 +136,8 @@ def run_tracks(year, n_tracks, b):
     m_init_fx = [0] * 12
     tcgp_month = [0] * 12
     tcgp_init_fx = [0] * 12
+    tcgp_dilated_fx = [0] * 12
+
     n_seeds = np.zeros((len(basin_ids), 12))
     T_s = namelist.total_track_time_days * 24 * 60 * 60     # total time to run tracks
     fn_wnd_stat = env_wind.get_env_wnd_fn()
@@ -136,9 +146,9 @@ def run_tracks(year, n_tracks, b):
     for i in range(12):
         dt_month = datetime.datetime(year, i + 1, 15)
         ds_dt_month = input.convert_from_datetime(ds_wnd, [dt_month])[0].astype('datetime64[ns]')
-        vpot_month = np.nan_to_num(vpot.interp(time = ds_dt_month).data, 0)
-        rh_mid_month = rh_mid.interp(time = ds_dt_month).data
-        chi_month = chi.interp(time = ds_dt_month).data
+        vpot_month = np.nan_to_num(vpot.sel(time = ds_dt_month, method='nearest').data, 0)
+        rh_mid_month = rh_mid.sel(time = ds_dt_month, method='nearest').data
+        chi_month = chi.sel(time = ds_dt_month, method='nearest').data
         chi_month[np.isnan(chi_month)] = 5
         m_init_fx[i] = mat.interp2_fx(lon, lat, rh_mid_month)
         chi_month = np.maximum(np.minimum(np.exp(np.log(chi_month + 1e-3) + namelist.log_chi_fac) + namelist.chi_fac, 5), 1e-5)
@@ -150,10 +160,26 @@ def run_tracks(year, n_tracks, b):
         cpl_fast[i].init_fields(lon, lat, chi_month, vpot_month, mld_month, strat_month)
 
         gds_dt_month = input.convert_from_datetime(gds, [dt_month])[0]
-        tcgp_month[i] = np.nan_to_num(tcgp.interp(time=gds_dt_month).data, 0)
+        tcgp_month[i] = np.nan_to_num(tcgp.sel(time=gds_dt_month, method='nearest').data, 0)
         tcgp_init_fx[i] = mat.interp2_fx(tcgp['lon'], tcgp['lat'], tcgp_month[i])
 
+        # Dilated-max tcgp field for cheap seed pre-filter. A TC seed can only reach TS-strength genesis 
+        # within a plausible translation radius. we reject seeds where the neighborhood-max tcgp is zero 
+        # so we skip the expensive ODE integration for seeds that could not pass the strict
+        # post-integration tcgp check anyway
+        tcgp_dilation_radius_deg = 5.0
+        dlat = float(np.abs(np.mean(np.diff(tcgp['lat'].data))))
+        dlon = float(np.abs(np.mean(np.diff(tcgp['lon'].data))))
+        ksize_lat = int(np.ceil(tcgp_dilation_radius_deg / dlat)) * 2 + 1
+        ksize_lon = int(np.ceil(tcgp_dilation_radius_deg / dlon)) * 2 + 1
+        tcgp_dilated = maximum_filter(tcgp_month[i], size=(ksize_lat, ksize_lon), mode='nearest')
+        tcgp_dilated_fx[i] = mat.interp2_fx(tcgp['lon'], tcgp['lat'], tcgp_dilated)
+
     max_tcgp_month = np.nanmax(tcgp_month)
+
+    _log('year=%d setup done in %.1fs — starting track generation (%d tracks)' %
+         (year, time.time() - t0, n_tracks))
+    t_tracks = time.time()
 
     # Output vectors.
     nt = 0
@@ -172,7 +198,14 @@ def run_tracks(year, n_tracks, b):
     seeds_df_list = []
     tcs_df_list = []
 
+    next_pct = 10
     while nt < n_tracks:
+        # "Progress bar":
+        pct = 100 * nt / n_tracks
+        if pct >= next_pct:
+            print(f"{next_pct}% done")
+            next_pct += 10
+        
         seed_passed = False
         while not seed_passed:
             # Random genesis location for the seed (weighted by area).
@@ -209,7 +242,9 @@ def run_tracks(year, n_tracks, b):
                 seed_df = pd.DataFrame([[gen_lat,gen_lon,month_seed,year]],columns=['lat','lon','month','year'])
                 seeds_df_list.append(seed_df)
                 if (pi_gen > 35):
-                    seed_passed = True
+                    tcgp_nbhd = float(tcgp_dilated_fx[month_seed - 1].ev(gen_lon, gen_lat))
+                    if tcgp_nbhd > 0:
+                        seed_passed = True
 
         # Set the initial value of m to a function of relative humidity.
         v_init = namelist.seed_v_init_ms + np.random.randn(1)[0]
@@ -231,7 +266,7 @@ def run_tracks(year, n_tracks, b):
             v_thresh_2d = np.interp(2*24*60*60, res.t, v_track.flatten())
 
             # TCGP check for genesis location
-            genesis_v_thresh = 19.88  # 17/0.88 m/s — tropical storm threshold
+            genesis_v_thresh = 19.88  # 17/0.88 m/s — tropical storm threshold 
             genesis_idx = np.where(v_track.flatten() >= genesis_v_thresh)[0]
             tcgp_passed = False
             if len(genesis_idx) > 2:
@@ -271,11 +306,15 @@ def run_tracks(year, n_tracks, b):
                 tc_month[nt] = month_seed
                 tc_basin[nt] = basin_ids[basin_idx]
                 nt += 1
+                _log('year=%d — accepted track %d/%d (elapsed %.1fs)' %
+                     (year, nt, n_tracks, time.time() - t_tracks))
 
         else:
             tcs_df = pd.DataFrame([[gen_lat,gen_lon,month_seed,year]],columns=['lat','lon','month','year'])
             tcs_df_list.append(tcs_df)
 
+    _log('year=%d done in %.1fs (setup %.1fs + tracks %.1fs)' %
+         (year, time.time() - t0, t_tracks - t0, time.time() - t_tracks))
     seed_tries = pd.concat(seeds_df_list)
     tc_tries = pd.concat(tcs_df_list)
 
@@ -293,10 +332,17 @@ def run_downscaling(basin_id):
     yearE = namelist.end_year
 
     s = time.time()
-    if namelist.use_dask:
-        cl_args = {'n_workers': namelist.n_procs,
+
+    n_years = yearE - yearS + 1
+    # Don't bother with dask overhead when there's nothing to parallelize over.
+    use_dask_eff = namelist.use_dask and n_years > 1
+    if use_dask_eff:
+        n_workers = min(namelist.n_procs, n_years)
+        cl_args = {'n_workers': n_workers,
                    'processes': True,
                    'threads_per_worker': 1}
+        print('[run_downscaling] dask cluster: %d workers for %d years' %
+              (n_workers, n_years), flush=True)
         with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
             lazy_results = []
             f_args = []
@@ -307,6 +353,9 @@ def run_downscaling(basin_id):
             
             out = dask.compute(*lazy_results)
     else:
+        if namelist.use_dask:
+            print('[run_downscaling] only %d year(s); running serially '
+                  '(dask overhead not worth it)' % n_years, flush=True)
         f_args = [(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
         out = [run_tracks(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
 
