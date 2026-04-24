@@ -12,7 +12,7 @@ import xarray as xr
 import time
 
 import namelist
-from dask.distributed import LocalCluster, Client
+from dask.distributed import LocalCluster, Client, as_completed
 from intensity import coupled_fast, ocean
 from thermo import calc_thermo
 from track import env_wind
@@ -71,6 +71,58 @@ def fn_tracks_duplicates(fn_trk):
         f_int += 1
     return fn_trk_out
 
+"""
+Filename for a single-year checkpoint file (used when namelist.save_yearly=True)
+"""
+def get_fn_tracks_yearly(b, year):
+    fn_args = (namelist.output_directory, namelist.exp_name,
+               b.basin_id, namelist.exp_prefix, year)
+    return '%s/%s/tracks_%s_%s_%d.nc' % fn_args
+
+"""
+Build an xr.Dataset from one or more run_tracks() return tuples. out_list is a list of the per-year tuples 
+years is a parallel list of the year each tuple corresponds to
+"""
+def _build_tracks_dataset(out_list, years, basin_ids):
+    tc_lon = np.concatenate([x[0] for x in out_list], axis=0)
+    tc_lat = np.concatenate([x[1] for x in out_list], axis=0)
+    tc_v = np.concatenate([x[2] for x in out_list], axis=0)
+    tc_m = np.concatenate([x[3] for x in out_list], axis=0)
+    tc_vmax = np.concatenate([x[4] for x in out_list], axis=0)
+    tc_rmax = np.concatenate([x[5] for x in out_list], axis=0)
+    tc_r34 = np.concatenate([x[6] for x in out_list], axis=0)
+    tc_env_wnds = np.concatenate([x[7] for x in out_list], axis=0)
+    tc_months = np.concatenate([x[8] for x in out_list], axis=0)
+    tc_basins = np.concatenate([x[9] for x in out_list], axis=0)
+    tc_years = np.concatenate([[years[i]] * out_list[i][0].shape[0]
+                               for i in range(len(out_list))], axis=0)
+    n_seeds = np.array([x[10] for x in out_list])
+
+    total_time_s = namelist.total_track_time_days * 24 * 60 * 60
+    n_steps_output = int(total_time_s / namelist.output_interval_s) + 1
+    ts_output = np.linspace(0, total_time_s, n_steps_output)
+
+    ds = xr.Dataset(
+        data_vars=dict(lon_trks=(["n_trk", "time"], tc_lon),
+                       lat_trks=(["n_trk", "time"], tc_lat),
+                       u250_trks=(["n_trk", "time"], tc_env_wnds[:,:,0]),
+                       v250_trks=(["n_trk", "time"], tc_env_wnds[:,:,1]),
+                       u850_trks=(["n_trk", "time"], tc_env_wnds[:,:,2]),
+                       v850_trks=(["n_trk", "time"], tc_env_wnds[:,:,3]),
+                       v_trks=(["n_trk", "time"], tc_v),
+                       m_trks=(["n_trk", "time"], tc_m),
+                       vmax_trks=(["n_trk", "time"], tc_vmax),
+                       rmax_trks=(["n_trk", "time"], tc_rmax),
+                       r34_trks=(["n_trk", "time"], tc_r34),
+                       tc_month=(["n_trk"], tc_months),
+                       tc_basins=(["n_trk"], tc_basins),
+                       tc_years=(["n_trk"], tc_years),
+                       seeds_per_month=(["year", "basin", "month"], n_seeds)),
+        coords=dict(n_trk=range(tc_lon.shape[0]), time=ts_output,
+                    year=np.asarray(years), basin=basin_ids,
+                    month=list(range(1, 13))))
+    return ds
+
 def _log(msg):
     print('[%s] [run_tracks pid=%d] %s' % (
         datetime.datetime.now().strftime('%H:%M:%S'), os.getpid(), msg), flush=True)
@@ -81,7 +133,7 @@ described by "b" (can be global), in the year.
 """
 def run_tracks(year, n_tracks, b):
     t0 = time.time()
-    _log('year=%d basin=%s — start' % (year, b.basin_id))
+    _log('starting year=%d basin=%s' % (year, b.basin_id))
 
     # Load thermodynamic and ocean variables.
     fn_th = calc_thermo.get_fn_thermo()
@@ -177,7 +229,7 @@ def run_tracks(year, n_tracks, b):
 
     max_tcgp_month = np.nanmax(tcgp_month)
 
-    _log('year=%d setup done in %.1fs — starting track generation (%d tracks)' %
+    _log('year=%d setup done in %.1fs. Starting track generation (%d tracks)' %
          (year, time.time() - t0, n_tracks))
     t_tracks = time.time()
 
@@ -306,7 +358,7 @@ def run_tracks(year, n_tracks, b):
                 tc_month[nt] = month_seed
                 tc_basin[nt] = basin_ids[basin_idx]
                 nt += 1
-                _log('year=%d — accepted track %d/%d (elapsed %.1fs)' %
+                _log('year=%d - accepted track %d/%d (elapsed %.1fs)' %
                      (year, nt, n_tracks, time.time() - t_tracks))
 
         else:
@@ -334,7 +386,62 @@ def run_downscaling(basin_id):
     s = time.time()
 
     n_years = yearE - yearS + 1
-    # Don't bother with dask overhead when there's nothing to parallelize over.
+
+    basin_ids = sorted([k for k in namelist.basin_bounds if k != 'GL'])
+    save_yearly = bool(getattr(namelist, 'save_yearly', False))
+    os.makedirs('%s/%s' % (namelist.output_directory, namelist.exp_name), exist_ok=True)
+
+    if save_yearly:
+        all_years = list(range(yearS, yearE + 1))
+        todo_years = [yr for yr in all_years if not os.path.exists(get_fn_tracks_yearly(b, yr))]
+        skipped = [yr for yr in all_years if yr not in todo_years]
+        if skipped:
+            print('[run_downscaling] save_yearly: skipping %d already done! year(s): %s' % (len(skipped), skipped), flush=True)
+        if not todo_years:
+            print('[run_downscaling] nothing to do, all yearly files exist', flush=True)
+            return
+
+        seed_csv = '%s/%s/seed_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix)
+        tc_csv = '%s/%s/tc_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix)
+
+        def _save_year(yr, out_tuple):
+            ds_yr = _build_tracks_dataset([out_tuple], [yr], basin_ids)
+            fn_yr = get_fn_tracks_yearly(b, yr)
+            ds_yr.to_netcdf(fn_yr, mode='w')
+            print('[run_downscaling] saved %s' % fn_yr, flush=True)
+            # Append per-year seed/tc tries CSV (header only if file new)
+            for df, csv_path in ((out_tuple[11], seed_csv), (out_tuple[12], tc_csv)):
+                header = not os.path.exists(csv_path)
+                df.to_csv(csv_path, mode='a', header=header, index=False)
+
+        use_dask_eff = namelist.use_dask and len(todo_years) > 1
+        if use_dask_eff:
+            n_workers = min(namelist.n_procs, len(todo_years))
+            cl_args = {'n_workers': n_workers, 'processes': True, 'threads_per_worker': 1}
+            print('[run_downscaling] dask cluster: %d workers for %d year(s) (save_yearly=True)' % (n_workers, len(todo_years)), flush=True)
+            with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+                # Use futures + as_completed so we persist each year to disk
+                futures = {client.submit(run_tracks, yr, n_tracks, b): yr for yr in todo_years}
+                for fut in as_completed(futures):
+                    yr = futures[fut]
+                    try:
+                        out_tuple = fut.result()
+                    except Exception as err:
+                        print('[run_downscaling] year %d FAILED: %r' % (yr, err), flush=True)
+                        continue
+                    _save_year(yr, out_tuple)
+                    del out_tuple  # release worker memory
+        else:
+            if namelist.use_dask:
+                print('[run_downscaling] only %d year(s); running serially' % len(todo_years), flush=True)
+            for yr in todo_years:
+                out_tuple = run_tracks(yr, n_tracks, b)
+                _save_year(yr, out_tuple)
+
+        print('[run_downscaling] done in %.1fs' % (time.time() - s), flush=True)
+        return
+
+    # Don't bother with dask overhead when there's nothing to parallelize over:
     use_dask_eff = namelist.use_dask and n_years > 1
     if use_dask_eff:
         n_workers = min(namelist.n_procs, n_years)
@@ -359,52 +466,17 @@ def run_downscaling(basin_id):
         f_args = [(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
         out = [run_tracks(yr, n_tracks, b) for yr in range(yearS, yearE+1)]
 
-    # Process the output and save as a netCDF file.
-    tc_lon = np.concatenate([x[0] for x in out], axis = 0)
-    tc_lat = np.concatenate([x[1] for x in out], axis = 0)
-    tc_v = np.concatenate([x[2] for x in out], axis = 0)
-    tc_m = np.concatenate([x[3] for x in out], axis = 0)
-    tc_vmax = np.concatenate([x[4] for x in out], axis = 0)
-    tc_rmax = np.concatenate([x[5] for x in out], axis = 0)
-    tc_r34 = np.concatenate([x[6] for x in out], axis = 0)
-    tc_env_wnds = np.concatenate([x[7] for x in out], axis = 0)
-    tc_months = np.concatenate([x[8] for x in out], axis = 0)
-    tc_basins = np.concatenate([x[9] for x in out], axis = 0)
-    tc_years = np.concatenate([[i+yearS]*out[i][0].shape[0] for i in range(len(out))], axis = 0)
-    n_seeds = np.array([x[10] for x in out])
 
-    seed_tries = pd.concat([x[11] for x in out], axis = 0)
-    tc_tries = pd.concat([x[12] for x in out], axis = 0)
+    seed_tries = pd.concat([x[11] for x in out], axis=0)
+    tc_tries = pd.concat([x[12] for x in out], axis=0)
 
-    total_time_s = namelist.total_track_time_days*24*60*60
-    n_steps_output = int(total_time_s / namelist.output_interval_s) + 1
-    ts_output = np.linspace(0, total_time_s, n_steps_output)
     yr_trks = np.stack([[x[0]] for x in f_args]).flatten()
-    basin_ids = sorted([k for k in namelist.basin_bounds if k != 'GL'])
+    ds = _build_tracks_dataset(list(out), list(yr_trks), basin_ids)
 
-    ds = xr.Dataset(data_vars = dict(lon_trks = (["n_trk", "time"], tc_lon),
-                                     lat_trks = (["n_trk", "time"], tc_lat),
-                                     u250_trks = (["n_trk", "time"], tc_env_wnds[:, :, 0]),
-                                     v250_trks = (["n_trk", "time"], tc_env_wnds[:, :, 1]),
-                                     u850_trks = (["n_trk", "time"], tc_env_wnds[:, :, 2]),
-                                     v850_trks = (["n_trk", "time"], tc_env_wnds[:, :, 3]),
-                                     v_trks = (["n_trk", "time"], tc_v),
-                                     m_trks = (["n_trk", "time"], tc_m),
-                                     vmax_trks = (["n_trk", "time"], tc_vmax),
-                                     rmax_trks = (["n_trk", "time"], tc_rmax),
-                                     r34_trks = (["n_trk", "time"], tc_r34),
-                                     tc_month = (["n_trk"], tc_months),
-                                     tc_basins = (["n_trk"], tc_basins),                                     
-                                     tc_years = (["n_trk"], tc_years),
-                                     seeds_per_month = (["year", "basin", "month"], n_seeds)),
-                    coords = dict(n_trk = range(tc_lon.shape[0]), time = ts_output,
-                                  year = yr_trks, basin = basin_ids, month = list(range(1, 13))))
-
-    os.makedirs('%s/%s' % (namelist.base_directory, namelist.exp_name), exist_ok = True)
     fn_trk_out = fn_tracks_duplicates(get_fn_tracks(b))
 
-    seed_tries.to_csv('%s/%s/seed_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode = 'w')
-    tc_tries.to_csv('%s/%s/tc_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode = 'w')
+    seed_tries.to_csv('%s/%s/seed_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode='w')
+    tc_tries.to_csv('%s/%s/tc_tries_%s.csv' % (namelist.output_directory, namelist.exp_name, namelist.exp_prefix), mode='w')
 
-    ds.to_netcdf(fn_trk_out, mode = 'w')
+    ds.to_netcdf(fn_trk_out, mode='w')
     print('Saved %s' % fn_trk_out)

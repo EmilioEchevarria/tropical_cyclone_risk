@@ -15,8 +15,10 @@ sys.path.append(parent)
 
 import namelist
 
-year_start = int(namelist.start_year)
-year_end = int(namelist.end_year)
+#year_start = int(namelist.start_year)
+#year_end = int(namelist.end_year)
+year_start = int(1981)
+year_end = int(2025)
 fn_base = namelist.base_directory
 os.makedirs(fn_base, exist_ok = True)
 

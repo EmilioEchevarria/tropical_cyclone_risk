@@ -35,7 +35,7 @@ var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
 
 ########################### Parallelism Parameters ##########################
 use_dask = True
-n_procs = 12              # number of processes to use in dask
+n_procs = 28              # number of processes to use in dask
 
 ############################ TC Risk Parameters #############################
 """
@@ -43,15 +43,16 @@ These parameters configure the dates for the TC-risk model.
 """
 start_year = 1981                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 1982                      # year to stop downscaling
+end_year = 2013                      # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """
 These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
-total_track_time_days = 12            # total time to integrate tracks, days
-tracks_per_year = 500                  # total number of tracks to simulate per year
+total_track_time_days = 13            # total time to integrate tracks, days
+tracks_per_year = 1000                  # total number of tracks to simulate per year
+save_yearly = True
 
 """
 These parameters configure thermodynamics and thermodynamic constants.
@@ -83,7 +84,7 @@ alpha_max = [0.41, 0.78]              # maximum value of each steering coefficie
 alpha_min = [0.22, 0.59]              # minimum value of each steering coefficient (coupled track only)
 u_beta = -1.0                         # zonal beta drift, m/s
 v_beta = 2.                          # meridional beta drift, m/s
-T_days = 20                           # period of the fourier series, days
+T_days = 15                           # period of the fourier series, days
 seed_v_init_ms = 6.5                    # initial seed v intensity, m/s
 seed_v_2d_threshold_ms = 7          # seed v threshold after 2 days, m/s
 seed_v_threshold_ms = 15              # seed v threshold over entire lifetime, m/s
@@ -99,6 +100,15 @@ lat_vort_power = {'NA': 6, 'EP': 6,   # power decay towards the equator
                   'SI': 3, 'SP': 7, 'NI': 2.5}
 # Initial m based on large-scale relative humidity
 f_mInit = lambda rh: 0.20 / (1 + np.exp(-(rh - 0.55) * 10)) + 0.125
+
+# Intensity-dependent translation-velocity "wiggle" --> Adds a 2 component high-freq
+# stovchastic perturbation to v_bam, with amplitude sigma(v) = wiggle_amp_ms * exp(-v / wiggle_v_scale_ms)
+# This makes weaker TCs "wiggly" more than strong, coherent ones
+# Set wiggle_amp_ms = 0 to disable
+wiggle_amp_ms = 2                  # peak wiggly amplitude at v = 0, in m/s
+wiggle_v_scale_ms = 25.0              # e-folding scale of wiggle decay with intensity, in m/s
+T_wiggle_days = 1.0                   # period of the wiggle Fourier series, in days
+N_wiggle = 5                          # number of Fourier components in the "wiggle" series
 
 """
 Basins for which the model is enabled.
@@ -120,7 +130,7 @@ basin_bounds = {'EP': ['180E', '0N', '290E', '60N'],
                 'NA': ['260E', '0N', '360E', '60N'],
                 'NI': ['30E', '0N', '100E', '50N'],
                 'SI': ['20E', '45S', '100E', '0S'],
-                'AU': ['100E', '45S', '180E', '0S'],
+                'AU': ['90E', '40S', '180E', '0S'],
                 'SP': ['180E', '45S', '250E', '0S'],
                 'WP': ['100E', '0N', '180E', '60N'],
                 'GL': ['0E', '90S', '360E', '90N']}
