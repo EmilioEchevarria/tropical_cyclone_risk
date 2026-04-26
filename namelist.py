@@ -35,7 +35,7 @@ var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
 
 ########################### Parallelism Parameters ##########################
 use_dask = True
-n_procs = 28              # number of processes to use in dask
+n_procs = 24              # number of processes to use in dask
 
 ############################ TC Risk Parameters #############################
 """
@@ -43,7 +43,7 @@ These parameters configure the dates for the TC-risk model.
 """
 start_year = 1981                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 2013                      # year to stop downscaling
+end_year = 2025                      # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """

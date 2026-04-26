@@ -36,6 +36,10 @@ def get_fn_tcgp():
     )
     return fn_tcgp
 
+def _get_fn_tcgp_yearly(year):
+    """Path to the per-year tcgp cache file."""
+    return '%s/yearly/tcgp_%s_%d.nc' % (namelist.output_directory, namelist.exp_prefix, year)
+
 def genesis_point(tcgp, size=1):
     """
     Return a genesis point, based on weighted random sampling
@@ -132,72 +136,73 @@ def compute_genesis(dt_start, dt_end):
     
     return tcgp
 
+def _compute_and_save_tcgp_year(year, ds_ref):
+    """Compute tcgp for a single year and write its yearly cache file."""
+    import xarray as _xr
+    # Grab the month-centered timestamps that fall in this year
+    times_year = [
+        x for x in input.convert_to_datetime(ds_ref, ds_ref["time"].values)
+        if x >= datetime.datetime(year, 1, 1) and x <= datetime.datetime(year, 12, 31, 23, 59)
+    ]
+    if len(times_year) == 0:
+        return None
+
+    # Extend end so day=15 monthly thermo/wnd entries fall inside the slice
+    dt_start = times_year[0]
+    dt_end_padded = (np.datetime64(times_year[-1]) + np.timedelta64(20, 'D')).astype('datetime64[us]').astype(datetime.datetime)
+
+    tcgp_yr = compute_genesis(dt_start, dt_end_padded)
+
+    # Timestamps at day=15 for storage
+    ds_times_year = input.convert_from_datetime(
+        ds_ref,
+        np.array([datetime.datetime(x.year, x.month, 15) for x in times_year]))
+
+    lat_full = ds_ref[input.get_lat_key()].data
+    lat_sorted = np.sort(lat_full)
+    lat_filt = lat_sorted[(lat_sorted >= -65) & (lat_sorted <= 65)]
+
+    ds_genesis = _xr.Dataset(
+        data_vars=dict(tcgp=(["time", "lat", "lon"], tcgp_yr.data)),
+        coords=dict(lon=("lon", ds_ref[input.get_lon_key()].data),
+                    lat=("lat", lat_filt),
+                    time=("time", ds_times_year)))
+    fn_yr = _get_fn_tcgp_yearly(year)
+    os.makedirs(os.path.dirname(fn_yr), exist_ok=True)
+    try:
+        ds_genesis.to_netcdf(fn_yr, engine='h5netcdf')
+    except Exception:
+        ds_genesis.to_netcdf(fn_yr, engine='netcdf4')
+    print('Saved yearly cache %s' % fn_yr, flush=True)
+    return fn_yr
 
 def gen_genesis():
     if os.path.exists(get_fn_tcgp()):
         return
 
-    # Load datasets metadata. Since SST is split into multiple files and can
-    # cause parallel reads with open_mfdataset to hang, save as a single file.
-    dt_start, dt_end = input.get_bounding_times()
-    ds = input.load_mslp().sortby("latitude", ascending=True).sel(latitude=slice(-65,65))
+    os.makedirs('%s/yearly' % namelist.output_directory, exist_ok=True)
+    ds = input.load_mslp().sortby("latitude", ascending=True).sel(latitude=slice(-65, 65))
 
-    ct_bounds = [dt_start, dt_end]
-    ds_times = input.convert_from_datetime(
-        ds,
-        np.array(
-            [
-                x
-                for x in input.convert_to_datetime(ds, ds["time"].values)
-                if x >= ct_bounds[0] and x <= ct_bounds[1]
-            ]
-        ),
-    )
+    years_needed = list(range(namelist.start_year, namelist.end_year + 1))
+    years_to_compute = [y for y in years_needed
+                        if not os.path.exists(_get_fn_tcgp_yearly(y))]
+    years_cached = [y for y in years_needed if y not in years_to_compute]
+    if years_cached:
+        print('[gen_genesis] yearly cache hit for years: %s' % years_cached, flush=True)
 
-    n_chunks = namelist.n_procs
-    chunks = np.array_split(ds_times, np.minimum(n_chunks, np.floor(len(ds_times) / 2)))
-    n_chunks = len(chunks)
+    for i, y in enumerate(years_to_compute):
+        print(f"[gen_genesis] Processing year {y} ({i+1}/{len(years_to_compute)})...", flush=True)
+        _compute_and_save_tcgp_year(y, ds)
 
-    # 2. Run the loop manually (Serial processing)
-    out = []
-    for i, chunk in enumerate(chunks):
-        print(f"Processing chunk {i+1} of {len(chunks)}...")
-        # Extend chunk end so day=15 monthly thermo/wnd entries fall inside slice.
-        chunk_end = chunk[-1] + np.timedelta64(20, 'D')
-        result = compute_genesis(chunk[0], chunk_end)
-        out.append(result)
+    # Assemble combined from yearly caches for the requested range.
+    yearly_fns = [_get_fn_tcgp_yearly(y) for y in years_needed if os.path.exists(_get_fn_tcgp_yearly(y))]
+    if not yearly_fns:
+        raise RuntimeError('No yearly tcgp caches available to assemble %s' % get_fn_tcgp())
 
-    ds_times = input.convert_from_datetime(
-        ds,
-        np.array(
-            [
-                datetime.datetime(x.year, x.month, 15)
-                for x in [
-                    x
-                    for x in input.convert_to_datetime(ds, ds["time"].values)
-                    if x >= ct_bounds[0] and x <= ct_bounds[1]
-                ]
-            ]
-        ),
-    )
+    ds_combined = xr.open_mfdataset(yearly_fns, combine='by_coords').load()
 
-    #tcgp = np.concatenate([x[0] for x in out], axis=0)
-    tcgp = xr.concat(out, dim='time')
-
-    # Use lat/lon dim names to stay consistent with env_wnd and thermo files.
-    lat_full = ds[input.get_lat_key()].data
-    lat_sorted = np.sort(lat_full)
-    lat_filt = lat_sorted[(lat_sorted >= -65) & (lat_sorted <= 65)]
-
-    ds_genesis = xr.Dataset(
-        data_vars=dict(
-            tcgp=(["time", "lat", "lon"], tcgp.data),
-        ),
-        coords=dict(
-            lon=("lon", ds[input.get_lon_key()].data),
-            lat=("lat", lat_filt),
-            time=("time", ds_times),
-        ),
-    )
-    ds_genesis.to_netcdf(get_fn_tcgp())
+    try:
+        ds_combined.to_netcdf(get_fn_tcgp(), engine='h5netcdf')
+    except Exception:
+        ds_combined.to_netcdf(get_fn_tcgp(), engine='netcdf4')
     print("Saved %s" % get_fn_tcgp())

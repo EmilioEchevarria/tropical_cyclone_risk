@@ -11,13 +11,19 @@ import metpy.calc as mpcalc
 from metpy.units import units
 
 """
-Returns the name of the file containing environmental wind statistics.
+Returns the name of the (combined) file containing environmental wind statistics
 """
 def get_env_wnd_fn():
     fn_out = '%s/env_wnd_%s_%d%02d_%d%02d.nc' % (namelist.output_directory, namelist.exp_prefix,
                                                  namelist.start_year, namelist.start_month,
                                                  namelist.end_year, namelist.end_month)
     return(fn_out)
+
+"""
+Path to the per-year wind stats cache file
+"""
+def _get_env_wnd_fn_yearly(year):
+    return '%s/yearly/env_wnd_%s_%d.nc' % (namelist.output_directory, namelist.exp_prefix, year)
 
 """
 Deterministic ordered list of all levels for which we store mean winds
@@ -109,57 +115,81 @@ def read_env_wnd_fn(fn_wnd_stat, dt_s = None, dt_e = None):
     return (wnd_Mean, wnd_Cov)
 
 """
-Generate the wind mean and covariance matrices used to advect
-tropical cyclones.
+Generate the wind mean and covariance matrices used to advect TCs
 """
 def gen_wind_mean_cov():
     fn_out = get_env_wnd_fn()
     if os.path.exists(fn_out):
         return
 
-    # Since the operations are massively parallelized, we want individual
-    # control over the files being opened.
+    os.makedirs('%s/yearly' % namelist.output_directory, exist_ok=True)
+
+    # Since the operations are massively parallelized, we want individual control over the files being opened.
     dt_start, dt_end = input.get_bounding_times()
     fns_ua = input._find_in_timerange(input._glob_prefix(input.get_u_key()), dt_start, dt_end)
-    fns_va = input._find_in_timerange(input._glob_prefix(input.get_v_key()), dt_start, dt_end) 
+    fns_va = input._find_in_timerange(input._glob_prefix(input.get_v_key()), dt_start, dt_end)
     n_files = min(len(fns_ua), len(fns_va))
-    if namelist.use_dask:
-        cl_args = {'n_workers': namelist.n_procs,
-                    'processes': True,
-                    'threads_per_worker': 1}
-        lazy_results = []
-        with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
-            for i in range(min(len(fns_ua), len(fns_va))):
-                lazy_result = dask.delayed(wnd_stat_wrapper)((fns_ua[i], fns_va[i]))
-                lazy_results.append(lazy_result)
-            out = dask.compute(*lazy_results)
-    else:
-        out = [wnd_stat_wrapper((fns_ua[i], fns_va[i])) for i in range(n_files)]
-    out_fns = [x for x in out if x is not None]
 
-    # Combine all intermediate files into one dataset, and delete
-    ds = input._open_fns(out_fns)
-    da = ds['wnd_stats'].load()
+     # Only process files for years whose yearly cache is missing
+    jobs = []
+    for i in range(n_files):
+        yr = _year_from_input_fn(fns_ua[i])
+        if yr is None or not os.path.exists(_get_env_wnd_fn_yearly(yr)):
+            jobs.append((fns_ua[i], fns_va[i]))
+        else:
+            print('[gen_wind_mean_cov] yearly cache hit for %d — skipping' % yr, flush=True)
 
-    var_Mean = wind_mean_vector_names()
-    var_Var = sum([[x for x in y if len(x) > 0] for y in wind_cov_matrix_names()], [])
-    var_names = var_Mean + var_Var + ['dudyDLM_Mean', 'dvdxDLM_Mean', 'dzdyDLM_Mean']
-    var_dict = dict()
-    for i in range(len(var_names)):
-        var_dict[var_names[i]] = da[:, i, :, :].rename(var_names[i])
-    ds.close()
-    del ds, da
+    if jobs:
+        if namelist.use_dask:
+            dask.config.set({'distributed.worker.profile.enabled': False})
+            cl_args = {'n_workers': namelist.n_procs,
+                        'processes': True,
+                        'threads_per_worker': 1}
+            lazy_results = []
+            with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+                for job in jobs:
+                    lazy_results.append(dask.delayed(wnd_stat_wrapper)(job))
+                dask.compute(*lazy_results)
+        else:
+            for job in jobs:
+                wnd_stat_wrapper(job)
 
-    ds_e = xr.Dataset(data_vars = var_dict)
+    years = list(range(namelist.start_year, namelist.end_year + 1))
+    yearly_fns = [_get_env_wnd_fn_yearly(y) for y in years if os.path.exists(_get_env_wnd_fn_yearly(y))]
+    if not yearly_fns:
+        raise RuntimeError('No yearly env_wnd caches available to assemble combined file %s' % fn_out)
+
+    ds = input._open_fns(yearly_fns).load()
+
+    # Select the monthly entries inside [start, end] range
+    dt_lo = datetime.datetime(namelist.start_year, namelist.start_month, 1)
+    dt_hi = datetime.datetime(namelist.end_year, namelist.end_month, 28)
+    ds = ds.sel(time=slice(dt_lo, dt_hi))
+
     try:
-        ds_e.to_netcdf(fn_out, mode='w', engine='h5netcdf')
+        ds.to_netcdf(fn_out, mode='w', engine='h5netcdf')
+        ds.close()
     except Exception:
-        ds_e.to_netcdf(fn_out, mode='w', engine='netcdf4')
+        ds.to_netcdf(fn_out, mode='w', engine='netcdf4')
+        ds.close()
+
     print('Saved %s' % fn_out)
 
-    # Remove intermediate files
-    for fn in out_fns:
-        os.remove(fn)
+"""
+Extract the year from an input filename, returns None if not parseable
+Expects filenames containing ..._YYYYMM.nc, ..._YYYY.nc, or similar
+"""
+def _year_from_input_fn(fn):
+    import re
+    base = os.path.basename(fn)
+    # Try YYYYMM first, then plain YYYY.
+    m = re.search(r'(\d{4})(\d{2})?\.nc$', base)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'[_\-](\d{4})[_\-]', base)
+    if m:
+        return int(m.group(1))
+    return None
 
 def wnd_stat_wrapper(args):
     fn_u, fn_v = args
@@ -201,14 +231,24 @@ def wnd_stat_wrapper(args):
                           coords = dict(lon = ("lon", ds_ua[input.get_lon_key()].data),
                                         lat = ("lat", ds_ua[input.get_lat_key()].data),
                                         time = ("time", input.convert_from_datetime(ds_ua, t_months).astype('datetime64[ns]'))))
-    ds_wnd = da_wnd.to_dataset(name='wnd_stats')
-    fn_ds_wnd = '%s/env_wnd_%s_p%d%02d_%d%02d.nc' % (namelist.output_directory, namelist.exp_prefix,
-                                                     t_months[0].year, t_months[0].month,
-                                                     t_months[-1].year, t_months[-1].month)
+
+    var_Mean = wind_mean_vector_names()
+    var_Var = sum([[x for x in y if len(x) > 0] for y in wind_cov_matrix_names()], [])
+    var_names = var_Mean + var_Var + ['dudyDLM_Mean', 'dvdxDLM_Mean', 'dzdyDLM_Mean']
+    var_dict = {var_names[i]: da_wnd[:, i, :, :].rename(var_names[i])
+                for i in range(len(var_names))}
+    ds_wnd = xr.Dataset(data_vars=var_dict)
+
+    year = t_months[0].year
+    os.makedirs('%s/yearly' % namelist.output_directory, exist_ok=True)
+    fn_ds_wnd = _get_env_wnd_fn_yearly(year)
+
     try:
         ds_wnd.to_netcdf(fn_ds_wnd, engine='h5netcdf')
+        print('Saved yearly cache %s' % fn_ds_wnd, flush=True)
     except Exception:
         ds_wnd.to_netcdf(fn_ds_wnd, engine='netcdf4')
+        print('Saved yearly cache %s' % fn_ds_wnd, flush=True)
     return fn_ds_wnd
 
 """

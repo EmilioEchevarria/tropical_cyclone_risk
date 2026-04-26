@@ -21,6 +21,12 @@ def get_fn_thermo():
                                                namelist.end_year, namelist.end_month)
     return(fn_th)
 
+"""
+Path to the per-year thermo cache file
+"""
+def _get_fn_thermo_yearly(year):
+    return '%s/yearly/thermo_%s_%d.nc' % (namelist.output_directory, namelist.exp_prefix, year)
+
 
 def compute_thermo(dt_start, dt_end):
     ds_sst = input.load_sst(dt_start, dt_end).load()
@@ -76,64 +82,90 @@ def compute_thermo(dt_start, dt_end):
 
     return (vmax, chi, rh_mid)
 
-def gen_thermo():
-    # TODO: Assert all of the datasets have the same length in time.
-    if os.path.exists(get_fn_thermo()):
-        return
+def _compute_and_save_year(year, ds_ref):
+    """Compute thermo for a single year and write its yearly cache file"""
+    import xarray as _xr
+    dt_start = datetime.datetime(year, 1, 1)
+    dt_end = datetime.datetime(year, 12, 31, 23, 59)
 
-    # Load datasets metadata. Since SST is split into multiple files and can
-    # cause parallel reads with open_mfdataset to hang, save as a single file.
-    dt_start, dt_end = input.get_bounding_times()
-    ds = input.load_mslp()
+    # Grab the month-centered timestamps that fall in this year
+    times_year = [x for x in input.convert_to_datetime(ds_ref, ds_ref['time'].values) if x >= dt_start and x <= dt_end]
+    if len(times_year) == 0:
+        return None
 
-    ct_bounds = [dt_start, dt_end]
-    ds_times = input.convert_from_datetime(ds,
-                   np.array([x for x in input.convert_to_datetime(ds, ds['time'].values)
-                             if x >= ct_bounds[0] and x <= ct_bounds[1]]))
+    vmax, chi, rh_mid = compute_thermo(times_year[0], times_year[-1])
 
-    n_chunks = namelist.n_procs if namelist.use_dask else 1
-    chunks = np.array_split(ds_times, np.minimum(n_chunks, np.floor(len(ds_times) / 2)))
-    n_chunks = len(chunks)
+    ds_times_year = input.convert_from_datetime(ds_ref, np.array([datetime.datetime(x.year, x.month, 15) for x in times_year]))
 
-    if namelist.use_dask:
-        cl_args = {'n_workers': namelist.n_procs,
-                   'processes': True,
-                   'threads_per_worker': 1}
-        lazy_results = []
-        with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
-            for i in range(n_chunks):
-                lazy_result = dask.delayed(compute_thermo)(chunks[i][0], chunks[i][-1])
-                lazy_results.append(lazy_result)
-            out = dask.compute(*lazy_results, scheduler = 'processes', num_workers = n_chunks)
-    else:
-        out = [compute_thermo(chunks[i][0], chunks[i][-1]) for i in range(n_chunks)]
-
-    # Clean up and process output.
-    # Ensure monthly timestamps have middle-of-the-month days.
-    ds_times = input.convert_from_datetime(ds,
-                  np.array([datetime.datetime(x.year, x.month, 15) for x in
-                           [x for x in input.convert_to_datetime(ds, ds['time'].values)
-                            if x >= ct_bounds[0] and x <= ct_bounds[1]]]))
-    vmax = np.concatenate([x[0] for x in out], axis = 0)
-    chi = np.concatenate([x[1] for x in out], axis = 0)
-    rh_mid = np.concatenate([x[2] for x in out], axis = 0)
-
-    # Filter latitudes to [-65, 65]; no TCs form at higher latitudes.
-    lat_full = ds[input.get_lat_key()].data
+    lat_full = ds_ref[input.get_lat_key()].data
     lat_mask = (lat_full >= -65) & (lat_full <= 65)
     lat_filt = lat_full[lat_mask]
     vmax = vmax[:, lat_mask, :]
     chi = chi[:, lat_mask, :]
     rh_mid = rh_mid[:, lat_mask, :]
 
-    ds_thermo = xr.Dataset(data_vars = dict(vmax = (['time', 'lat', 'lon'], vmax),
-                                            chi = (['time', 'lat', 'lon'], chi),
-                                            rh_mid = (['time', 'lat', 'lon'], rh_mid)),
-                           coords = dict(lon = ("lon", ds[input.get_lon_key()].data),
-                                         lat = ("lat", lat_filt),
-                                         time = ("time", ds_times.astype('datetime64[ns]'))))
+    ds_thermo = _xr.Dataset(
+        data_vars=dict(vmax=(['time', 'lat', 'lon'], vmax),
+                       chi=(['time', 'lat', 'lon'], chi),
+                       rh_mid=(['time', 'lat', 'lon'], rh_mid)),
+        coords=dict(lon=("lon", ds_ref[input.get_lon_key()].data),
+                    lat=("lat", lat_filt),
+                    time=("time", ds_times_year.astype('datetime64[ns]'))))
+    fn_yr = _get_fn_thermo_yearly(year)
+    os.makedirs(os.path.dirname(fn_yr), exist_ok=True)
+
     try:
-        ds_thermo.to_netcdf(get_fn_thermo(), engine='h5netcdf')
+        ds_thermo.to_netcdf(fn_yr, engine='h5netcdf')
+        print('Saved yearly cache %s' % fn_yr, flush=True)
     except Exception:
-        ds_thermo.to_netcdf(get_fn_thermo(), engine='netcdf4')
+        ds_thermo.to_netcdf(fn_yr, engine='netcdf4')
+        print('Saved yearly cache %s' % fn_yr, flush=True)
+    
+    return fn_yr
+
+def gen_thermo():
+    # TODO: Assert all of the datasets have the same length in time.
+    if os.path.exists(get_fn_thermo()):
+        return
+
+    os.makedirs('%s/yearly' % namelist.output_directory, exist_ok=True)
+    dt_start, dt_end = input.get_bounding_times()
+    ds = input.load_mslp()
+
+    # Years for which a yearly cache must be produced
+    years_needed = list(range(namelist.start_year, namelist.end_year + 1))
+    years_to_compute = [y for y in years_needed if not os.path.exists(_get_fn_thermo_yearly(y))]
+    years_cached = [y for y in years_needed if y not in years_to_compute]
+    if years_cached:
+        print('[gen_thermo] yearly cache hit for years: %s' % years_cached, flush=True)
+
+    if years_to_compute:
+        if namelist.use_dask:
+            dask.config.set({'distributed.worker.profile.enabled': False})
+            n_workers = min(namelist.n_procs, len(years_to_compute))
+            cl_args = {'n_workers': n_workers,
+                       'processes': True,
+                       'threads_per_worker': 1}
+            with LocalCluster(**cl_args) as cluster, Client(cluster) as client:
+                lazy_results = [dask.delayed(_compute_and_save_year)(y, ds)
+                                for y in years_to_compute]
+                dask.compute(*lazy_results, scheduler='processes',
+                             num_workers=n_workers)
+        else:
+            for y in years_to_compute:
+                _compute_and_save_year(y, ds)
+
+    # Assemble the combined file from yearly caches for the requested range
+    yearly_fns = [_get_fn_thermo_yearly(y) for y in years_needed if os.path.exists(_get_fn_thermo_yearly(y))]
+    if not yearly_fns:
+        raise RuntimeError('No yearly thermo caches available to assemble %s' % get_fn_thermo())
+
+    ds_combined = xr.open_mfdataset(yearly_fns, combine='by_coords').load()
+
+    try:
+        ds_combined.to_netcdf(get_fn_thermo(), engine='h5netcdf')
+        ds_combined.close()
+    except Exception:
+        ds_combined.to_netcdf(get_fn_thermo(), engine='netcdf4')
+        ds_combined.close()
     print('Saved %s' % get_fn_thermo())

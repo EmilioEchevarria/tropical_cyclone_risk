@@ -416,6 +416,7 @@ def run_downscaling(basin_id):
 
         use_dask_eff = namelist.use_dask and len(todo_years) > 1
         if use_dask_eff:
+            dask.config.set({'distributed.worker.profile.enabled': False})
             n_workers = min(namelist.n_procs, len(todo_years))
             cl_args = {'n_workers': n_workers, 'processes': True, 'threads_per_worker': 1}
             print('[run_downscaling] dask cluster: %d workers for %d year(s) (save_yearly=True)' % (n_workers, len(todo_years)), flush=True)
@@ -444,6 +445,7 @@ def run_downscaling(basin_id):
     # Don't bother with dask overhead when there's nothing to parallelize over:
     use_dask_eff = namelist.use_dask and n_years > 1
     if use_dask_eff:
+        dask.config.set({'distributed.worker.profile.enabled': False})
         n_workers = min(namelist.n_procs, n_years)
         cl_args = {'n_workers': n_workers,
                    'processes': True,
