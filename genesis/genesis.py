@@ -5,8 +5,64 @@ import xarray as xr
 import metpy.calc as mpcalc
 import metpy.constants as mpconst
 from metpy.units import units
-
+from scipy.ndimage import uniform_filter
+import namelist
 from util import input
+
+# Cache the Cd filter so we don't redo the load + interp + smoothing for every year.
+_CD_FILTER_CACHE = {}
+
+def _cd_filter(lons, lats):
+    """
+    Build the Cd-based topography filter on the requested (lons, lats) grid.
+    The filter values are ~1 over open ocean, 0 over high-Cd land
+    We multiplying TCGP by this filter to suppresses genesis probability 
+    over terrain where TCs cannot physically spin up
+    """
+
+    tcgp_cd_filter = True
+    tcgp_cd_path = '%s/intensity/data/Cd.nc' % namelist.src_directory
+    tcgp_cd_clip = 0.025                   # max Cd before smoothing (caps highest peaks)
+    tcgp_cd_ocean = 0.0007114              # nominal ocean Cd (filter = 1 here)
+    tcgp_cd_smooth_size = 10               # uniform_filter size in grid cells
+
+    lons = np.asarray(lons)
+    lats = np.asarray(lats)
+    key = (lons.shape, float(lons[0]), float(lons[-1]),
+           lats.shape, float(lats[0]), float(lats[-1]))
+    if key in _CD_FILTER_CACHE:
+        return _CD_FILTER_CACHE[key]
+
+    ds_cd = xr.open_dataset(tcgp_cd_path)
+    # Auto-detect the lon/lat coord names in the Cd file.
+    cd_lon = 'longitude' if 'longitude' in ds_cd.coords else 'lon'
+    cd_lat = 'latitude' if 'latitude' in ds_cd.coords else 'lat'
+    ds_cd = ds_cd.interp({cd_lon: lons, cd_lat: lats})
+    
+    cd = np.array(ds_cd['Cd'])
+    cd = np.where(np.isnan(cd), tcgp_cd_ocean, cd)
+    cd = np.minimum(cd, tcgp_cd_clip)
+
+    cd_ocean = tcgp_cd_ocean
+    cd_smoothed = uniform_filter(cd, size=tcgp_cd_smooth_size)
+
+    # Renormalise smoothed field back to [cd_ocean, cd.max()]
+    sm_min = cd_smoothed.min()
+    sm_max = cd_smoothed.max()
+    if sm_max > sm_min:
+        cd_smoothed = (cd_ocean + (cd_smoothed-sm_min)/(sm_max-sm_min) * (cd.max()-cd_ocean))
+    else:
+        cd_smoothed = np.full_like(cd_smoothed, cd_ocean)
+
+    denom = cd.max() - cd_ocean
+    if denom <= 0:
+        filt = np.ones_like(cd_smoothed)
+    else:
+        filt = 1.0 - (cd_smoothed - cd_ocean) / denom
+    filt = np.clip(filt, 0.0, 1.0).astype(np.float32)
+
+    _CD_FILTER_CACHE[key] = filt
+    return filt
 
 
 def _tcgp(vpot: xr.DataArray, xi: xr.DataArray, rh: xr.DataArray, shear: xr.DataArray):
@@ -27,6 +83,14 @@ def _tcgp(vpot: xr.DataArray, xi: xr.DataArray, rh: xr.DataArray, shear: xr.Data
     sigma = xr.where((1 - (shear / 20)) < 0, 0, 1 - (shear / 20))
 
     tcgp = nu * mu * rho * sigma
+
+    # Apply Cd filtering:
+    lon_ky = input.get_lon_key() if input.get_lon_key() in tcgp.coords else 'lon'
+    lat_ky = input.get_lat_key() if input.get_lat_key() in tcgp.coords else 'lat'
+    filt = _cd_filter(tcgp[lon_ky].values, tcgp[lat_ky].values)
+    tcgp = tcgp * xr.DataArray(
+        filt, dims=(lat_ky, lon_ky),
+        coords={lat_ky: tcgp[lat_ky], lon_ky: tcgp[lon_ky]})
 
     return tcgp.metpy.dequantify()
 

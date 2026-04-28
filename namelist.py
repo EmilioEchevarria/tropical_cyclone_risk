@@ -9,7 +9,7 @@ Namelist file that serves as the configuration file for the TC-risk model.
 src_directory = os.path.dirname(os.path.abspath(__file__))
 base_directory = '%s/data/era5' % src_directory
 output_directory = '%s/data/era5' % src_directory
-exp_name = 'test'
+exp_name = 'test_wiggle'
 # For now, we support either 'GCM' or 'ERA5'. Different file types and variable
 # names can be added by modifying the "input.py" file and adding the appropriate
 # variable key words in the structure var_keys.
@@ -51,7 +51,7 @@ These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
 total_track_time_days = 13            # total time to integrate tracks, days
-tracks_per_year = 1000                  # total number of tracks to simulate per year
+tracks_per_year = 100                  # total number of tracks to simulate per year
 save_yearly = True
 
 """
@@ -83,10 +83,10 @@ m_alpha = [0.0025, -0.0025]           # change of each coefficient per unit stor
 alpha_max = [0.41, 0.78]              # maximum value of each steering coefficient (coupled track only)
 alpha_min = [0.22, 0.59]              # minimum value of each steering coefficient (coupled track only)
 u_beta = -1.0                         # zonal beta drift, m/s
-v_beta = 2.                          # meridional beta drift, m/s
+v_beta = 3.                          # meridional beta drift, m/s
 T_days = 15                           # period of the fourier series, days
-seed_v_init_ms = 6.5                    # initial seed v intensity, m/s
-seed_v_2d_threshold_ms = 7          # seed v threshold after 2 days, m/s
+seed_v_init_ms = 5                    # initial seed v intensity, m/s
+seed_v_2d_threshold_ms = 6.5          # seed v threshold after 2 days, m/s
 seed_v_threshold_ms = 15              # seed v threshold over entire lifetime, m/s
 seed_vmax_threshold_ms = 18           # seed vmax threshold over entire lifetime, m/s
 # Atmospheric boundary layer depth (FAST), m
@@ -103,11 +103,10 @@ f_mInit = lambda rh: 0.20 / (1 + np.exp(-(rh - 0.55) * 10)) + 0.125
 
 # Intensity-dependent translation-velocity "wiggle" --> Adds a 2 component high-freq
 # stovchastic perturbation to v_bam, with amplitude sigma(v) = wiggle_amp_ms * exp(-v / wiggle_v_scale_ms)
-# This makes weaker TCs "wiggly" more than strong, coherent ones
-# Set wiggle_amp_ms = 0 to disable
-wiggle_amp_ms = 2                  # peak wiggly amplitude at v = 0, in m/s
+# This makes weaker TCs "wiggly" more than strong, coherent ones. Set wiggle_amp_ms = 0 to disable
+wiggle_amp_ms = 5                     # peak wiggly amplitude at v = 0, in m/s
 wiggle_v_scale_ms = 25.0              # e-folding scale of wiggle decay with intensity, in m/s
-T_wiggle_days = 1.0                   # period of the wiggle Fourier series, in days
+T_wiggle_days = 3.0                   # period of the wiggle Fourier series, in days 
 N_wiggle = 5                          # number of Fourier components in the "wiggle" series
 
 """
