@@ -34,52 +34,51 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         # Variable drag coefficient
         self.f_Cd = geo.read_drag(basin)
 
-        _shear_names = env_wind.steering_wind_mean_names()
-        self._u250_idx = _shear_names.index('ua250_Mean')
-        self._v250_idx = _shear_names.index('va250_Mean')
-        self._u850_idx = _shear_names.index('ua850_Mean')
-        self._v850_idx = _shear_names.index('va850_Mean')
+        # Extra Cd amplification when over land:
+        self._cd_land_factor = float(getattr(namelist, 'Cd_land_factor', 1.0))
 
     """ Return if over land (True) or ocean (False) """
     def _get_over_land(self, clon, clat):
         # 9/2/2020: Changed to 1 (and not a rounded number), since PI
         # is changed to be reduced by the area of the core over land.
-        return(self.f_land.ev(clon, clat).item() == 1)
+        return(self.f_land.ev(clon, clat).flatten()[0] == 1)
 
     """ Return the current bathymetry/topography at a position."""
     def _get_current_bathymetry(self, clon, clat):
-        return self.f_bath.ev(clon, clat).item()
+        return self.f_bath.ev(clon, clat).flatten()[0]
 
     """ Return the current mixed layer depth at a position. """
     def _get_current_mixed(self, clon, clat):
-        return self.f_mld.ev(clon, clat).item()
+        return self.f_mld.ev(clon, clat).flatten()[0]
 
     """ Return the current drag coefficient at a position. """
     def _get_current_Cd(self, clon, clat):
-        return self.f_Cd.ev(clon, clat).item()
+        Cd = self.f_Cd.ev(clon, clat).item()
+        if self._cd_land_factor != 1.0 and self._get_over_land(clon, clat):
+            Cd *= self._cd_land_factor
+        return Cd
 
     """ Return the current sub-mixed layer thermal stratification, (K / 100 m)
         at time t_s."""
     def _get_current_strat(self, clon, clat):
-        return self.f_strat.ev(clon, clat).item()
+        return self.f_strat.ev(clon, clat).flatten()[0]
 
     """ Return the current potential intensity at a position"""
     def _get_current_vpot(self, clon, clat):
         if self._get_over_land(clon, clat):
             return(0)
         else:
-            return self.f_vpot.ev(clon, clat).item()
+            return self.f_vpot.ev(clon, clat).flatten()[0]
 
     """ Calculate, alpha (Equation 4), the ocean feedback parameter.
     Ocean mixing is turned off when the mixed layer depth equals or
     exceeds the local ocean depth (alpha = 1), or when the hurricane
     is over land.
     """
-    def _calc_alpha(self, clon, clat, v_trans, v, v_pot=None):
+    def _calc_alpha(self, clon, clat, v_trans, v):
         h_m = self._get_current_mixed(clon, clat)
         t_strat = self._get_current_strat(clon, clat)
-        if v_pot is None:
-            v_pot = self._get_current_vpot(clon, clat)
+        v_pot = self._get_current_vpot(clon, clat)
         u_T = np.linalg.norm(v_trans)
         bathymetry = self._get_current_bathymetry(clon, clat)
 
@@ -127,24 +126,12 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     """ Calculate the shear vector from a vector of environmental winds.
         The shear vector is [zonal shear, meridional shear]."""
     def _calc_env_wnd_to_shr(self, env_wnds):
-        #u250, v250, u850, v850 = env_wind.deep_layer_winds(np.expand_dims(env_wnds, axis = 0))
-        #shr = np.array([u250 - u850, v250 - v850]).flatten()
-        #return shr
-        
-        # env_wnds is a 1-D (nWLvl,). sp we index it directly instead of round-tripping through 
-        # deep_layer_winds, which expects a 2-D (time, nWLvl) input
-        if env_wnds.ndim == 1:
-            return np.array([env_wnds[self._u250_idx] - env_wnds[self._u850_idx],
-                             env_wnds[self._v250_idx] - env_wnds[self._v850_idx]])
-        u250, v250, u850, v850 = env_wind.deep_layer_winds(env_wnds)
-        return np.array([u250 - u850, v250 - v850]).flatten()
+        u250, v250, u850, v850 = env_wind.deep_layer_winds(np.expand_dims(env_wnds, axis = 0))
+        shr = np.array([u250 - u850, v250 - v850]).flatten()
+        return shr
 
     """ Calculate the magnitude of the 250-850 hPa environmental wind shear."""
     def _calc_S(self, env_wnds):
-        if env_wnds.ndim == 1:
-            du = env_wnds[self._u250_idx] - env_wnds[self._u850_idx]
-            dv = env_wnds[self._v250_idx] - env_wnds[self._v850_idx]
-            return np.sqrt(du * du + dv * dv)
         return np.linalg.norm(self._calc_env_wnd_to_shr(env_wnds))
 
     """ Calculate the normalized mid-level saturation entropy deficit."""
@@ -164,19 +151,16 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     gamma must vary with time as well (Equation 7).
     Potential intensity (v_p) also varies with time.
     """
-    def _dvdt(self, clon, clat, v, m, v_trans, env_wnds, t, v_pot=None, Cd=None, alpha=None):
-        if v_pot is None:
-            v_pot = self._get_current_vpot(clon, clat)
-        if alpha is None:
-            alpha = self._calc_alpha(clon, clat, v_trans, v, v_pot=v_pot)
+    def _dvdt(self, clon, clat, v, m, v_trans, env_wnds, t):
+        v_pot = self._get_current_vpot(clon, clat)
+        alpha = self._calc_alpha(clon, clat, v_trans, v)
         gamma = self._calc_gamma(alpha)
         beta = self._calc_beta()
         # In Emanuel (2012), Emanuel (2017), there are differing expressions for
         # the intensification rate. It seems Ck and Cd are used interchangeably.
         # Here, in lieu of Ck, we use Cd, and include a variable drag coefficient 
         # to represent faster decay over land.
-        if Cd is None:
-            Cd = self._get_current_Cd(clon, clat)
+        Cd = self._get_current_Cd(clon, clat)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -187,7 +171,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     """ Initializes m if no m has been given. Assumes an initial dvdt. """
     def _init_m(self, y, dvdt):
         steering_coefs = self._calc_steering_coefs(y[2])
-        v_bam, env_wnds = self._step_bam_track(y[0], y[1], 0., steering_coefs, v=y[2])
+        v_bam, env_wnds = self._step_bam_track(y[0], y[1], 0., steering_coefs)
         v_pot = np.max([self._get_current_vpot(y[0], y[1]),
                         self._get_current_vpot(y[0]-0.25, y[1]-0.25),
                         self._get_current_vpot(y[0]-0.25, y[1]+0.25),
@@ -197,7 +181,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         gamma = self._calc_gamma(alpha)
         beta = self._calc_beta()
 
-        Cd = self._get_current_Cd(y[0], y[1])
+        Cd = self._get_current_Cd(clon, clat)
         numer = 2 * self.h_bl / Cd * dvdt + (y[2] ** 2)
         denom = alpha * beta * (v_pot ** 2) + gamma * (y[2] ** 2)
         return(np.maximum(np.minimum(np.cbrt(numer / denom), 1), 0))
@@ -208,14 +192,13 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     kappa (Equation 9).
     However, environmental wind shear (S) still varies with time.
     """
-    def _dmdt(self,  clon, clat, v, m, env_wnds, t, Cd=None):
+    def _dmdt(self,  clon, clat, v, m, env_wnds, t):
         venti = self._calc_venti(t, clon, clat, env_wnds)
         # In Emanuel (2012), Emanuel (2017), there are differing expressions for
         # the intensification rate. It seems Ck and Cd are used interchangeably.
         # Here, in lieu of Ck, we use Cd, and include a variable drag coefficient 
         # to represent faster decay over land.
-        if Cd is None:
-            Cd = self._get_current_Cd(clon, clat)
+        Cd = self._get_current_Cd(clon, clat)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -237,26 +220,13 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     """ Time-derivative of the state vector, y.
     y[0] is longitude, y[1] is latitude, y[2] is v, and y[3] is m."""
     def dydt(self, t, y):
-        #steering_coefs = self._calc_steering_coefs(y[2])
-        #v_bam, env_wnds = self._step_bam_track(y[0], y[1], t, steering_coefs)
-        #dLondt = v_bam[0] / constants.earth_R * 180. / np.pi / (np.cos(y[1] * np.pi / 180.))
-        clon = y[0]; clat = y[1]; v = y[2]; m = y[3]
-        steering_coefs = self._calc_steering_coefs(v)
-        v_bam, env_wnds = self._step_bam_track(clon, clat, t, steering_coefs, v=v)
-        dLondt = v_bam[0] / constants.earth_R * 180. / np.pi / (np.cos(clat * np.pi / 180.))
+        steering_coefs = self._calc_steering_coefs(y[2])
+        v_bam, env_wnds = self._step_bam_track(y[0], y[1], t, steering_coefs)
+        dLondt = v_bam[0] / constants.earth_R * 180. / np.pi / (np.cos(y[1] * np.pi / 180.))
         dLatdt = v_bam[1] / constants.earth_R * 180. / np.pi
 
-        #dvdt = self._dvdt(*y, v_bam, env_wnds, t)
-        #dmdt = self._dmdt(*y, env_wnds, t)
-        # Compute scalar fields once per step and share between _dvdt/_dmdt.
-        v_pot = self._get_current_vpot(clon, clat)
-        Cd = self._get_current_Cd(clon, clat)
-        alpha = self._calc_alpha(clon, clat, v_bam, v, v_pot=v_pot)
-
-        dvdt = self._dvdt(clon, clat, v, m, v_bam, env_wnds, t,
-                          v_pot=v_pot, Cd=Cd, alpha=alpha)
-        dmdt = self._dmdt(clon, clat, v, m, env_wnds, t, Cd=Cd)
-
+        dvdt = self._dvdt(*y, v_bam, env_wnds, t)
+        dmdt = self._dmdt(*y, env_wnds, t)
         if self.debug:
             return(np.array([0, 0, dvdt, dmdt]))
         else:
@@ -285,12 +255,13 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     def gen_track(self, clon, clat, v, m = None):
         # Make sure that tracks are sufficiently randomized.
         bam_track.random_seed()
+        self._wiggle_state = 0.0
 
         # Create the weights for the beta-advection model (across time).
-        #self.Fs = self.gen_synthetic_f()
-        #self.Fs_i = interp1d(self.t_s, self.Fs, axis = 1)
-        # Sampled via self._fs_at() (uniform-grid linear interp).
         self.Fs = self.gen_synthetic_f()
+        # if self._wiggle_enabled:
+        #     self.Fs_wiggle = self.gen_wiggle_f()
+        self.Fs_i = interp1d(self.t_s, self.Fs, axis = 1)
 
         # If the ventilation index is above some threshold, do not integrate.
         S = self._calc_S(self._env_winds(clon, clat, 0))
@@ -310,7 +281,8 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
                 return 0
             else:
                 # stopping point when TC reaches 4 m/s
-                return np.maximum(0, y[2] - 4.5)
+                return np.maximum(0, y[2] - 4)
+
         tc_dissipates.terminal = True
 
         # Solve for the intensity.
@@ -322,4 +294,24 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         res = solve_ivp(self.dydt, (0, self.total_time), np.asarray([clon, clat, v, m_init]),
                         t_eval = np.linspace(0, self.total_time, self.total_steps),
                         events = tc_dissipates, max_step = 86400)
+
+        if res.y.shape[1] > 0:
+            lons = res.y[0]
+            lats = res.y[1]
+            ts = res.t
+            cut_idx = None
+            for k in range(len(ts)):
+                vpot_k = self._get_current_vpot(lons[k], lats[k])
+                if vpot_k <= 0:
+                    continue
+                env_wnds_k = self._env_winds(lons[k], lats[k], ts[k])
+                S_k = self._calc_S(env_wnds_k)
+                chi_k = self._calc_chi(lons[k], lats[k])
+                if S_k * chi_k / vpot_k >= namelist.vent_index_dissipation:
+                    cut_idx = k
+                    break
+            if cut_idx is not None:
+                res.t = res.t[:cut_idx]
+                res.y = res.y[:, :cut_idx]
+                
         return res

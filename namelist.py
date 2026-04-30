@@ -9,7 +9,7 @@ Namelist file that serves as the configuration file for the TC-risk model.
 src_directory = os.path.dirname(os.path.abspath(__file__))
 base_directory = '%s/data/era5' % src_directory
 output_directory = '%s/data/era5' % src_directory
-exp_name = 'test_wiggle'
+exp_name = 'test'
 # For now, we support either 'GCM' or 'ERA5'. Different file types and variable
 # names can be added by modifying the "input.py" file and adding the appropriate
 # variable key words in the structure var_keys.
@@ -28,31 +28,29 @@ file_type = 'netcdf'
 # 'v' is meridional wind (daily)
 var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
                      'sp_hum': 'q', 'u': 'u', 'v': 'v',
-                     'lvl': 'pressure_level', 'lon': 'longitude', 'lat': 'latitude'},
+                     'lvl': 'isobaricInhPa', 'lon': 'longitude', 'lat': 'latitude'},
             'GCM': {'sst': 'tos', 'mslp': 'psl', 'temp': 'ta',
                     'sp_hum': 'hus', 'u': 'ua', 'v': 'va',
                     'lvl': 'plev', 'lon': 'lon', 'lat': 'lat'}}
 
 ########################### Parallelism Parameters ##########################
-use_dask = True
 n_procs = 24              # number of processes to use in dask
 
 ############################ TC Risk Parameters #############################
 """
 These parameters configure the dates for the TC-risk model.
 """
-start_year = 1981                     # year to start downscaling
+start_year = 1990                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 2025                      # year to stop downscaling
+end_year = 2009                       # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """
 These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
-total_track_time_days = 13            # total time to integrate tracks, days
+total_track_time_days = 15            # total time to integrate tracks, days
 tracks_per_year = 100                  # total number of tracks to simulate per year
-save_yearly = True
 
 """
 These parameters configure thermodynamics and thermodynamic constants.
@@ -64,9 +62,6 @@ Cd = 1.2e-3
 select_thermo = 1   # 1 for pseudoadiabatic, 2 for reversible thermodynamics
 select_interp = 2   # 1 for computation, 2 for interpolation
 
-genesis_levels = [250, 700, 850]       # hPa
-genesis_rh_level = 700                 # hPa
-
 """
 These parameters configure track and intensity constants.
 """
@@ -76,15 +71,15 @@ These parameters configure track and intensity constants.
 # The steering_coefficients ('steering_coefs') should have the same 
 # length as the number of levels.
 steering_levels = [250, 850]
-steering_coefs = [0.2, 0.8]           # constant steering coefficients if not coupled
+steering_coefs = [0.2, 0.8]           # constant steering coefficients if NOT coupled
 coupled_track = True                  # track coupled to intensity; overrides alpha
-y_alpha = [0.17, 0.83]                # value of steering coefficient at 0 knots
+y_alpha = [0.16, 0.84]                # value of steering coefficient at 0 knots
 m_alpha = [0.0025, -0.0025]           # change of each coefficient per unit storm intensity, 1 / kts
 alpha_max = [0.41, 0.78]              # maximum value of each steering coefficient (coupled track only)
 alpha_min = [0.22, 0.59]              # minimum value of each steering coefficient (coupled track only)
 u_beta = -1.0                         # zonal beta drift, m/s
-v_beta = 3.                          # meridional beta drift, m/s
-T_days = 15                           # period of the fourier series, days
+v_beta = 2.5                          # meridional beta drift, m/s
+T_days = 20                           # period of the fourier series, days
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
 seed_v_2d_threshold_ms = 6.5          # seed v threshold after 2 days, m/s
 seed_v_threshold_ms = 15              # seed v threshold over entire lifetime, m/s
@@ -96,18 +91,24 @@ log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
 lat_vort_fac = 2                      # sets where vorticity threshold decays toward equator
 lat_vort_power = {'NA': 6, 'EP': 6,   # power decay towards the equator
-                  'WP': 3.5, 'AU': 8,
+                  'WP': 3.5, 'AU': 6,
                   'SI': 3, 'SP': 7, 'NI': 2.5}
 # Initial m based on large-scale relative humidity
 f_mInit = lambda rh: 0.20 / (1 + np.exp(-(rh - 0.55) * 10)) + 0.125
 
-# Intensity-dependent translation-velocity "wiggle" --> Adds a 2 component high-freq
-# stovchastic perturbation to v_bam, with amplitude sigma(v) = wiggle_amp_ms * exp(-v / wiggle_v_scale_ms)
-# This makes weaker TCs "wiggly" more than strong, coherent ones. Set wiggle_amp_ms = 0 to disable
-wiggle_amp_ms = 5                     # peak wiggly amplitude at v = 0, in m/s
-wiggle_v_scale_ms = 25.0              # e-folding scale of wiggle decay with intensity, in m/s
-T_wiggle_days = 3.0                   # period of the wiggle Fourier series, in days 
-N_wiggle = 5                          # number of Fourier components in the "wiggle" series
+# Finish track when ventilation conditions are not favourable
+vent_index_dissipation = 1.75
+
+# Add perturbation to slow-moving tracks:
+wiggle_dtheta_lowU_dph = 80.0   # extra turn rate at U=0, deg/h
+wiggle_dtheta_inf_dph  = 8.6    # asymptotic turn rate at high U, deg/h
+wiggle_U_scale_kmh     = 10     # e-folding scale, km/h
+wiggle_U_cutoff_kmh    = 110.0  # high-U cutoff scale, km/h
+wiggle_U_cutoff_pow    = 1.3    # sharpness of cutoff
+wiggle_tau_hours = 4.0          # OU correlation timescale, hours
+
+# Extra dissipation over land (disable by setting it to 1)
+Cd_land_factor = 3.0
 
 """
 Basins for which the model is enabled.
@@ -129,7 +130,7 @@ basin_bounds = {'EP': ['180E', '0N', '290E', '60N'],
                 'NA': ['260E', '0N', '360E', '60N'],
                 'NI': ['30E', '0N', '100E', '50N'],
                 'SI': ['20E', '45S', '100E', '0S'],
-                'AU': ['90E', '40S', '180E', '0S'],
+                'AU': ['100E', '45S', '180E', '0S'],
                 'SP': ['180E', '45S', '250E', '0S'],
                 'WP': ['100E', '0N', '180E', '60N'],
                 'GL': ['0E', '90S', '360E', '90N']}
