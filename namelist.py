@@ -28,13 +28,14 @@ file_type = 'netcdf'
 # 'v' is meridional wind (daily)
 var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
                      'sp_hum': 'q', 'u': 'u', 'v': 'v',
-                     'lvl': 'isobaricInhPa', 'lon': 'longitude', 'lat': 'latitude'},
+                     'lvl': 'pressure_level', 'lon': 'longitude', 'lat': 'latitude'},
             'GCM': {'sst': 'tos', 'mslp': 'psl', 'temp': 'ta',
                     'sp_hum': 'hus', 'u': 'ua', 'v': 'va',
                     'lvl': 'plev', 'lon': 'lon', 'lat': 'lat'}}
 
 ########################### Parallelism Parameters ##########################
 n_procs = 24              # number of processes to use in dask
+use_dask = True
 
 ############################ TC Risk Parameters #############################
 """
@@ -51,6 +52,7 @@ These parameters configure the output.
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
 total_track_time_days = 15            # total time to integrate tracks, days
 tracks_per_year = 100                  # total number of tracks to simulate per year
+save_yearly = True
 
 """
 These parameters configure thermodynamics and thermodynamic constants.
@@ -61,6 +63,9 @@ Ck = 1.2e-3
 Cd = 1.2e-3
 select_thermo = 1   # 1 for pseudoadiabatic, 2 for reversible thermodynamics
 select_interp = 2   # 1 for computation, 2 for interpolation
+
+genesis_levels = [250, 700, 850]       # hPa
+genesis_rh_level = 700                 # hPa
 
 """
 These parameters configure track and intensity constants.
