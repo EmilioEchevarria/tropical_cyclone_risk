@@ -112,10 +112,10 @@ def gen_wind_mean_cov():
     var_dict = dict()
     for i in range(len(var_names)):
         var_dict[var_names[i]] = da[:, i, :, :].rename(var_names[i])
-    ds.close()
 
     ds_e = xr.Dataset(data_vars = var_dict)
     ds_e.to_netcdf(fn_out, mode = 'w')
+    ds.close()
     print('Saved %s' % fn_out)
 
     # Remove intermediate files
@@ -134,7 +134,7 @@ def wnd_stat_wrapper(args):
     # Find all of the months to average over.
     dts = input.convert_to_datetime(ds_ua, ds_ua['time'].values)
     dt_start = max([dt_start, dts[0]])
-    t_months = [dt_start]
+    t_months = [datetime.datetime(dt_start.year, dt_start.month, 15)]
     while t_months[-1] <= min([dt_end, dts[-1]]):
         cYear = t_months[-1].year
         cMonth = t_months[-1].month
@@ -215,7 +215,7 @@ def calc_wnd_stat(ua, va, dt):
             if i == j:
                 month_var_wnds[i][j] = month_wnds[i].var(dim = t_unit)
             else:
-                month_var_wnds[i][j] = xr.cov(month_wnds[i], month_wnds[j], dim = t_unit)
+                month_var_wnds[i][j] = xr.cov(month_wnds[i], month_wnds[j], dim = t_unit, ddof = 0)
 
     wnd_vars = [[x for x in y if len(x) > 0] for y in month_var_wnds]
     stats = sum(wnd_vars, month_mean_wnds)
