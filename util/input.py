@@ -51,11 +51,13 @@ def _find_in_timerange(fns, ct_start, ct_end = None):
     for fn in fns:
         ds = xr.open_dataset(fn)
         time = ds['time']                      # time
-        if ct_start is not None and ct_end is None:
-            if ((ct_start >= time[0]) & (ct_start <= time[-1])):
+        t_start = convert_from_datetime(ds, [ct_start])[0] if ct_start is not None else None
+        t_end = convert_from_datetime(ds, [ct_end])[0] if ct_end is not None else None
+        if t_start is not None and t_end is None:
+            if ((t_start >= time[0]) & (t_start <= time[-1])):
                 fns_multi.append(fn)
         else:
-            if ((time >= ct_start) & (time <= ct_end)).any():
+            if ((time >= t_start) & (time <= t_end)).any():
                 fns_multi.append(fn)
         ds.close()
 
