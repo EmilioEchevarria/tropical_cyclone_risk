@@ -5,7 +5,7 @@ from util import sphere
 # Calculate maximum wind speed from maximum azimuthal wind speed.
 def axi_to_max_wind(track_lon, track_lat, dt_track, tc_v, env_wnds):
     utran, vtran = sphere.calc_translational_speed(track_lon, track_lat, dt_track)
-    G = np.minimum(1., 0.8 + 0.35 * (1. + np.tanh((track_lat - 35.) / 10.)))
+    G = np.minimum(1., 0.8 + 0.35 * (1. + np.tanh((np.abs(track_lat) - 35.) / 10.)))
     u_shr = env_wnds[:, 0] - env_wnds[:, 2]
     v_shr = env_wnds[:, 1] - env_wnds[:, 3]
     U_inc = G * utran + 0.1 * u_shr * tc_v / 15.
