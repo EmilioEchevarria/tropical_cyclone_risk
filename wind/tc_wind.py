@@ -1,15 +1,22 @@
 
 import numpy as np
+import namelist
+from track import env_wind
 from util import sphere
 
-# Calculate maximum wind speed from maximum azimuthal wind speed.
+# Calculate maximum wind speed from maximum azimuthal wind speed. How much motion and shear add to the
+# strongest wind is set in the namelist (wind_asym_base, wind_asym_motion, wind_asym_shear, wind_asym_shear_v).
 def axi_to_max_wind(track_lon, track_lat, dt_track, tc_v, env_wnds):
     utran, vtran = sphere.calc_translational_speed(track_lon, track_lat, dt_track)
-    G = np.minimum(1., 0.8 + 0.35 * (1. + np.tanh((np.abs(track_lat) - 35.) / 10.)))
-    u_shr = env_wnds[:, 0] - env_wnds[:, 2]
-    v_shr = env_wnds[:, 1] - env_wnds[:, 3]
-    U_inc = G * utran + 0.1 * u_shr * tc_v / 15.
-    V_inc = G * vtran + 0.1 * v_shr * tc_v / 15.
+    G = np.minimum(1., namelist.wind_asym_motion + 0.35 * (1. + np.tanh((np.abs(track_lat) - 35.) / 10.)))
+    # The part that does not vanish with the motion points along the motion, the floor keeps it finite for a storm at rest
+    G = G + namelist.wind_asym_base / np.maximum(np.hypot(utran, vtran), 0.1)
+    u250, v250, u850, v850 = env_wind.deep_layer_winds(env_wnds)
+    u_shr = u250 - u850
+    v_shr = v250 - v850
+    shr_fac = namelist.wind_asym_shear * (tc_v / 15. if namelist.wind_asym_shear_v else 1.)
+    U_inc = G * utran + shr_fac * u_shr
+    V_inc = G * vtran + shr_fac * v_shr
 
     # Do not allow the wind increment to exceed 50% of the actual intensity.
     mag_inc = np.sqrt(np.power(U_inc, 2) + np.power(V_inc, 2))
