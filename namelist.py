@@ -82,8 +82,11 @@ v_beta = 2.5                          # meridional beta drift, m/s
 T_days = 20                           # period of the fourier series, days
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
 seed_v_2d_threshold_ms = 6.5          # seed v threshold after 2 days, m/s
-seed_v_threshold_ms = 15              # seed v threshold over entire lifetime, m/s
-seed_vmax_threshold_ms = 18           # seed vmax threshold over entire lifetime, m/s
+seed_v_threshold_ms = 0.0             # seed v threshold over entire lifetime, m/s (off: observations have no such test)
+seed_vmax_threshold_ms = 16.72        # seed vmax threshold over entire lifetime, m/s
+                                      # IBTrACS winds are rounded to 5 kt, so 35 kt starts from 32.5 kt
+seed_check_days = 2.0                 # time at which a seed must exceed seed_v_2d_threshold_ms, days
+
 # Atmospheric boundary layer depth (FAST), m
 atm_bl_depth = {'NA': 1400.0, 'EP': 1400.0, 'WP': 1800.0, 'AU': 1800.0,
                 'SI': 1600.0, 'SP': 2000.0, 'NI': 1500.0}

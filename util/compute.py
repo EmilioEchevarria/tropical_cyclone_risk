@@ -190,7 +190,7 @@ def run_tracks(year, n_tracks, b):
             # If the TC has not reached the threshold m/s after 2 days, throw it away.
             # The TC must also reach the genesis threshold during it's entire lifetime.
             v_thresh = namelist.seed_v_threshold_ms
-            v_thresh_2d = np.interp(2*24*60*60, res.t, v_track.flatten())
+            v_thresh_2d = np.interp(getattr(namelist, 'seed_check_days', 2.0)*24*60*60, res.t, v_track.flatten())
             is_tc = np.logical_and(np.any(v_track >= v_thresh), v_thresh_2d >= namelist.seed_v_2d_threshold_ms)
 
         if is_tc:
