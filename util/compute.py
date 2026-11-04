@@ -16,7 +16,7 @@ from intensity import coupled_fast, ocean
 from thermo import calc_thermo
 from track import env_wind
 from wind import tc_wind
-from util import basins, input, mat, seeds
+from util import basins, input, mat, seeds, tc_tracker
 
 """
 Driver function to compute zonal and meridional wind monthly mean and
@@ -26,7 +26,14 @@ def compute_downscaling_inputs():
     if namelist.file_type == 'grib':
         print('Preprocessing .grib files...')
         input.preprocess_grib()
-    
+
+    if tc_tracker.enabled():
+        print('Tracking storms in the daily winds...')
+        s = time.time()
+        tc_tracker.gen_positions()
+        e = time.time()
+        print('Time Elapsed: %f s' % (e - s))
+
     print('Computing monthly mean and variance of environmental wind...')
     s = time.time()
     env_wind.gen_wind_mean_cov()

@@ -33,6 +33,27 @@ var_keys = {'ERA5': {'sst': 'sst', 'mslp': 'sp', 'temp': 't',
                     'sp_hum': 'hus', 'u': 'ua', 'v': 'va',
                     'lvl': 'plev', 'lon': 'lon', 'lat': 'lat'}}
 
+# Environmental wind filter (track/env_filter.py) params:
+env_wind_sigma_km = 300.0             # width of the Gaussian smoothing, km
+env_wind_tc_radius_km = 600.0         # radius removed around each storm, km
+
+# Wind-only storm tracker (util/tc_tracker.py) params:
+tc_tracker_grid_deg = 1.0
+tc_tracker_params = dict(
+    z_track = 2.0e-5,                 # smoothed 850 hPa vorticity a candidate must have, 1/s
+    owz = 20e-6,                      # OWZ at 850 hPa a candidate must have nearby, 1/s (0.8 times this at 700 hPa)
+    z700_frac = 0.3,                  # smoothed 700 hPa vorticity it must have, as a fraction of that at 850 hPa
+    z_strong = 5.0e-5,                # a strong day: smoothed 850 hPa vorticity, 1/s (about 8 m/s tangential wind at 330 km)
+    w_strong = 12.0,                  # and largest 850 hPa wind within 3 degrees, m/s
+    min_days = 3,                     # days a track must last
+    min_strong = 2,                   # strong days over the ocean it must have
+    lat0 = 30.0,                      # latitude limit of the first strong day, degrees
+    shear0 = 15.0,                    # largest 850-250 hPa shear on the first strong day (over 5 degrees), m/s
+    tail_days = 1,                    # days kept after the last strong day
+    gap_days = 1,                     # days a track may go unseen
+    step_km = 700.0,                  # how far a vortex may move in a day, equatorward of 30 degrees
+    step_km_high = 1100.0)            # and poleward of it
+
 ########################### Parallelism Parameters ##########################
 n_procs = 16              # number of processes to use in dask
 
@@ -92,6 +113,7 @@ seed_check_days = 2.0                 # time at which a seed must exceed seed_v_
 seed_density = True
 seed_owz_threshold = 40e-6            # OWZ at 850 hPa on a seed day, 1/s (0.8 times this at 700 hPa) (Tory et al.2013) 
 seed_shear_max_ms = 25.0              # largest 850-250 hPa shear on a seed day, m/s
+seed_tc_radius_km = 1200.0            # radius left out around each storm, km
 seed_smooth_deg = 1.5                 # Gaussian smoothing of the monthly seed-day frequency, degrees
 seed_density_ref = 0.6                # seed-day frequency at which every draw would develop (only sets run time)
 

@@ -8,6 +8,8 @@ OWZ850 >= T, OWZ700 >= 0.8 T, cyclonic vorticity at 850 and 700 hPa, and
 |V250 - V850| < shear_max, with OWZ = sgn(f) * max(0, (zeta^2 - E^2 - F^2) / zeta^2) * (zeta + f)
 (zeta the relative vorticity, E and F the deformation). Only winds enter: potential intensity, humidity,
 ventilation and the ocean still decide which seeds become storms.
+
+The storms found by util/tc_tracker.py masked within namelist.seed_tc_radius_km
 """
 
 import datetime
@@ -53,6 +55,32 @@ def owz(u, v, lat, lon):
     return zeta * sg, sg * own * (zeta + 2 * 7.292e-5 * np.sin(phi)) # omega = 7.292e-5
 
 """
+Days (datetime64[D]), lons and lats of the TCs found by util/tc_tracker.py
+"""
+def storm_positions():
+    from util import tc_tracker
+    z = np.load(tc_tracker.get_fn_positions())
+    return (z['day'], z['lon'], z['lat'])
+
+""" Boolean (day, lat, lon) mask, True within radius_km of any of the positions on that day """
+def storm_mask(days, lat, lon, pos, radius_km):
+    from scipy.spatial import cKDTree
+    tc_day, tc_lon, tc_lat = pos
+    LAT, LON = np.meshgrid(np.radians(lat), np.radians(lon % 360.0), indexing = 'ij')
+    xyz = np.c_[(np.cos(LAT) * np.cos(LON)).ravel(), (np.cos(LAT) * np.sin(LON)).ravel(), np.sin(LAT).ravel()]
+    chord = 2 * np.sin(radius_km * 1000.0 / _R_Earth / 2)
+    near = np.zeros((len(days), len(lat), len(lon)), bool)
+    for di, d in enumerate(days):
+        j = np.nonzero(tc_day == d)[0]
+        if len(j) == 0:
+            continue
+        p1, l1 = np.radians(tc_lat[j]), np.radians(tc_lon[j])
+        tree = cKDTree(np.c_[np.cos(p1) * np.cos(l1), np.cos(p1) * np.sin(l1), np.sin(p1)])
+        dist, _ = tree.query(xyz, k = 1, distance_upper_bound = chord)
+        near[di] = np.isfinite(dist).reshape(len(lat), len(lon))
+    return near
+
+"""
 For the months of one pair of daily wind files: the fraction of usable days (away from observed storms) that
 are seed days, and the fraction of days that are usable.
 """
@@ -78,6 +106,7 @@ def seed_stat_wrapper(args):
     if len(t_months) == 0:
         return
 
+    pos = storm_positions()
     thr = namelist.seed_owz_threshold
     out = np.zeros((len(t_months), len(lat), len(lon)), np.float32)
     usable_frac = np.ones((len(t_months), len(lat), len(lon)), np.float32)
@@ -96,7 +125,7 @@ def seed_stat_wrapper(args):
         zc700, owz700 = owz(u700, v700, lat, lon)
         seed_day = ((owz850 >= thr) & (owz700 >= 0.8 * thr) & (zc850 > 0) & (zc700 > 0) &
                     (np.hypot(u250 - u850, v250 - v850) < namelist.seed_shear_max_ms))
-        usable = np.ones(seed_day.shape, bool)
+        usable = ~storm_mask(uniq, lat, lon, pos, namelist.seed_tc_radius_km)
         out[i] = (seed_day & usable).sum(axis = 0) / np.maximum(usable.sum(axis = 0), 1)
         usable_frac[i] = usable.mean(axis = 0)
 

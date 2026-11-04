@@ -6,6 +6,7 @@ import xarray as xr
 
 import namelist
 from dask.distributed import LocalCluster, Client
+from track import env_filter
 from util import input
 
 """
@@ -130,6 +131,9 @@ def wnd_stat_wrapper(args):
     ds_va = input._load_var_daily(fn_v)
     ua = ds_ua[input.get_u_key()]
     va = ds_va[input.get_v_key()]
+    if env_filter.enabled():
+        # Statistics of the environment: TCs removed, synoptic-scale smoothing (see track/env_filter.py)
+        ua, va = env_filter.environmental_winds(ua, va, input.get_lat_key(), input.get_lon_key())
 
     # Find all of the months to average over.
     dts = input.convert_to_datetime(ds_ua, ds_ua['time'].values)
