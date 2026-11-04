@@ -16,7 +16,7 @@ from intensity import coupled_fast, ocean
 from thermo import calc_thermo
 from track import env_wind
 from wind import tc_wind
-from util import basins, input, mat
+from util import basins, input, mat, seeds
 
 """
 Driver function to compute zonal and meridional wind monthly mean and
@@ -38,6 +38,13 @@ def compute_downscaling_inputs():
     calc_thermo.gen_thermo()
     e = time.time()
     print('Time Elapsed: %f s' % (e - s))
+
+    if seeds.enabled():
+        print('Computing seed-day frequency...')
+        s = time.time()
+        seeds.gen_seed_density()
+        e = time.time()
+        print('Time Elapsed: %f s' % (e - s))
 
 """
 Returns the name of the file containing downscaled tropical cyclone tracks.
@@ -125,6 +132,9 @@ def run_tracks(year, n_tracks, b):
                                                 namelist.output_interval_s, T_s)
         cpl_fast[i].init_fields(lon, lat, chi_month, vpot_month, mld_month, strat_month)
 
+    # Seed-day frequency (util/seeds.py) replaces the uniform seeding and the equatorward discard.
+    seed_fx = seeds.monthly_interpolators(year) if seeds.enabled() else None
+
     # Output vectors.
     nt = 0
     n_steps = cpl_fast[0].total_steps
@@ -160,11 +170,19 @@ def run_tracks(year, n_tracks, b):
             basin_val = np.zeros(len(basin_ids))
             for (b_idx, basin_id) in enumerate(basin_ids):
                 basin_val[b_idx] = f_basins[basin_id].ev(gen_lon, gen_lat)
-            basin_idx = np.argmax(basin_val)
-
-            # Discard seeds with increasing probability equatorwards.
+            basin_idx = np.argmax(basin_val) 
+            
             # If PI is less than 35 m/s, do not integrate, but treat as a seed.
             pi_gen = float(fast.f_vpot.ev(gen_lon, gen_lat))
+            if seed_fx is not None:
+                # Every draw counts as a seed; it develops in proportion to how often the flow there can host TCs
+                if np.nanmax(basin_val) > 1e-3:
+                    n_seeds[basin_idx, month_seed-1] += 1
+                    p_seed = float(seed_fx[month_seed - 1].ev(gen_lon, gen_lat)) / namelist.seed_density_ref
+                    if (np.random.uniform(0, 1, 1)[0] < p_seed) and (pi_gen > 35):
+                        seed_passed = True
+                continue
+            # Discard seeds with increasing probability equatorwards
             lat_vort_power = namelist.lat_vort_power[basin_ids[basin_idx]]
             prob_lowlat = np.power(np.minimum(np.maximum((np.abs(gen_lat) - namelist.lat_vort_fac) / 12.0, 0), 1), lat_vort_power)
             rand_lowlat = np.random.uniform(0, 1, 1)[0]

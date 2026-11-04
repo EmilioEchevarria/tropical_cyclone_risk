@@ -87,6 +87,14 @@ seed_vmax_threshold_ms = 16.72        # seed vmax threshold over entire lifetime
                                       # IBTrACS winds are rounded to 5 kt, so 35 kt starts from 32.5 kt
 seed_check_days = 2.0                 # time at which a seed must exceed seed_v_2d_threshold_ms, days
 
+# Genesis seeds (util/seeds.py). With seed_density = True, seeds develop in proportion to how often the env
+# can host a TC, instead of being spread uniformly with the basin-tuned lat_vort_fac / lat_vort_power
+seed_density = True
+seed_owz_threshold = 40e-6            # OWZ at 850 hPa on a seed day, 1/s (0.8 times this at 700 hPa) (Tory et al.2013) 
+seed_shear_max_ms = 25.0              # largest 850-250 hPa shear on a seed day, m/s
+seed_smooth_deg = 1.5                 # Gaussian smoothing of the monthly seed-day frequency, degrees
+seed_density_ref = 0.6                # seed-day frequency at which every draw would develop (only sets run time)
+
 # Atmospheric boundary layer depth (FAST), m
 atm_bl_depth = {'NA': 1400.0, 'EP': 1400.0, 'WP': 1800.0, 'AU': 1800.0,
                 'SI': 1600.0, 'SP': 2000.0, 'NI': 1500.0}
