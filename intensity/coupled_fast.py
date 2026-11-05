@@ -250,7 +250,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             dmdt = 0.5 * Cd / self._h_bl(v, clat) * ((1 - m) * v - venti * m)
-        return(dmdt)
+        return(dmdt * getattr(namelist, 'moisture_rate_fac', 1.0))
 
     """ Calculate the steering coefficients. """
     def _calc_steering_coefs(self, v):

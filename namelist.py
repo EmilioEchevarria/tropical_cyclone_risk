@@ -163,6 +163,7 @@ log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
 vent_inertial_exponent = 0.75
 vent_radius_km = 150.0
+moisture_rate_fac = 1.57
 spindown_fac = 1.5
 
 # Upper-ocean maps of the ocean feedback, from World Ocean Atlas 2023 (scripts/build_ocean_maps.py), 
