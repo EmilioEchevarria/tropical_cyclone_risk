@@ -22,11 +22,12 @@ kinetic energy power spectrum follows that of geostrophic turublence.
 """
 def gen_f(N, T, t, num):
     fs = np.zeros((num, np.size(t)))
+    p = getattr(namelist, 'fluct_spectrum_exponent', 1.5)
     for i in range(0, num):
         n = np.linspace(1, N, N)
         xln = np.tile(np.random.rand(N, 1), (1, np.size(t)))   # Zero phase correlation
-        fs[i, :] = np.sqrt(2 / np.sum(np.power(n, -3))) * \
-                   np.sum(np.multiply(np.tile(np.power(n, -1.5), (np.size(t), 1)).T,
+        fs[i, :] = np.sqrt(2 / np.sum(np.power(n, -2 * p))) * \
+                   np.sum(np.multiply(np.tile(np.power(n, -p), (np.size(t), 1)).T,
                                       np.sin(2. * np.pi * (np.outer(n, t) / T + xln))), axis=0)
     return(fs)
 
@@ -53,7 +54,7 @@ class BetaAdvectionTrack:
         self.total_time = total_time            # total time of track (seconds)
         self.total_steps = int(self.total_time / self.dt_track) + 1
         self.t_s = np.linspace(0, self.total_time, int(self.total_time / self.dt_track) + 1)
-        self.T_Fs = namelist.T_days*24*60*60    # 15-day period of the fourier series
+        self.T_Fs = namelist.T_days*24*60*60    # period of the fourier series
         self.u_beta = namelist.u_beta           # zonal beta drift speed
         self.v_beta = namelist.v_beta           # meridional beta drift speed
         self.nLvl = len(namelist.steering_levels)
