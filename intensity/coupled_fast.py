@@ -260,7 +260,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         gamma = self._calc_gamma(alpha)
         beta = self._calc_beta()
 
-        Cd = self._get_current_Cd(clon, clat)
+        Cd = self._get_current_Cd(y[0], y[1])
         numer = 2 * self._h_bl(y[2], y[1]) / Cd * dvdt + (y[2] ** 2)
         denom = alpha * beta * (v_pot ** 2) + gamma * (y[2] ** 2)
         return(np.maximum(np.minimum(np.cbrt(numer / denom), 1), 0))

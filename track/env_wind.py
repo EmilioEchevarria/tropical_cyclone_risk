@@ -44,11 +44,22 @@ def wind_cov_matrix_names():
     return var_Var
 
 """
+Raises a clear error when namelist.steering_levels cannot supply the deep-layer shear, which is defined between 250 and 850 hPa
+(ventilation and the wind field use it), so both must be steering levels.
+"""
+def check_shear_levels():
+    missing = [p for p in (250, 850) if p not in namelist.steering_levels]
+    if missing:
+        raise ValueError('namelist.steering_levels must include 250 and 850 hPa, since the deep-layer shear is defined between them '
+                         '(missing: %s; steering_levels = %s).' % (missing, namelist.steering_levels))
+
+"""
 Extracts the deep-layer from the wind vector 'env_wnds',
 which is assumed to be a 2-D array of dimensions (time, nWLvl).
 Used to generate deep-layer shear.
 """
 def deep_layer_winds(env_wnds):
+    check_shear_levels()
     var_names = wind_mean_vector_names()
     u250 = env_wnds[:, var_names.index('ua250_Mean')]
     v250 = env_wnds[:, var_names.index('va250_Mean')]
@@ -83,6 +94,7 @@ Generate the wind mean and covariance matrices used to advect
 tropical cyclones.
 """
 def gen_wind_mean_cov():
+    check_shear_levels()
     fn_out = get_env_wnd_fn()
     if os.path.exists(fn_out):
         return
