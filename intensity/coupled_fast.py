@@ -168,9 +168,9 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     gamma must vary with time as well (Equation 7).
     Potential intensity (v_p) also varies with time.
     """
-    def _dvdt(self, clon, clat, v, m, v_trans, env_wnds, t):
+    def _dvdt(self, clon, clat, v, m, v_trans, env_wnds, t, u_ocean = None):
         v_pot = self._get_current_vpot(clon, clat)
-        alpha = self._calc_alpha(clon, clat, v_trans, v)
+        alpha = self._calc_alpha(clon, clat, v_trans if u_ocean is None else u_ocean, v)
         gamma = self._calc_gamma(alpha)
         beta = self._calc_beta()
         # In Emanuel (2012), Emanuel (2017), there are differing expressions for
@@ -236,19 +236,23 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         return steering_coefs
 
     """ Time-derivative of the state vector, y.
-    y[0] is longitude, y[1] is latitude, y[2] is v, and y[3] is m."""
+    y[0] is longitude, y[1] is latitude, y[2] is v, and y[3] is m.
+    With ocean_motion_tau_hours, y[4] is the forward speed the ocean feedback answers to."""
     def dydt(self, t, y):
         steering_coefs = self._calc_steering_coefs(y[2])
         v_bam, env_wnds = self._step_bam_track(y[0], y[1], t, steering_coefs, y[2])
         dLondt = v_bam[0] / constants.earth_R * 180. / np.pi / (np.cos(y[1] * np.pi / 180.))
         dLatdt = v_bam[1] / constants.earth_R * 180. / np.pi
 
-        dvdt = self._dvdt(*y, v_bam, env_wnds, t)
-        dmdt = self._dmdt(*y, env_wnds, t)
+        dvdt = self._dvdt(*y[:4], v_bam, env_wnds, t, u_ocean = y[4] if y.size > 4 else None)
+        dmdt = self._dmdt(*y[:4], env_wnds, t)
         if self.debug:
-            return(np.array([0, 0, dvdt, dmdt]))
+            dy = [0, 0, dvdt, dmdt]
         else:
-            return(np.array([dLondt, dLatdt, dvdt, dmdt]))
+            dy = [dLondt, dLatdt, dvdt, dmdt]
+        if y.size > 4:
+            dy.append((np.linalg.norm(v_bam) - y[4]) / (namelist.ocean_motion_tau_hours * 3600.))
+        return(np.array(dy))
 
     """
     lon is a 1-D array describing the longitude of the fields: [lon]
@@ -305,7 +309,10 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
             m_init = self._init_m(np.asarray([clon, clat, v]), 0)
         else:
             m_init = m
-        res = solve_ivp(self.dydt, (0, self.total_time), np.asarray([clon, clat, v, m_init]),
+        y_init = [clon, clat, v, m_init]
+        if getattr(namelist, 'ocean_motion_tau_hours', 0.0) > 0:
+            y_init.append(np.linalg.norm(self._step_bam_track(clon, clat, 0., self._calc_steering_coefs(v), v)[0]))
+        res = solve_ivp(self.dydt, (0, self.total_time), np.asarray(y_init),
                         t_eval = np.linspace(0, self.total_time, self.total_steps),
                         events = tc_dissipates, max_step = 86400)
         return res
