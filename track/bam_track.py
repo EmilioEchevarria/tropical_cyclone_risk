@@ -32,6 +32,27 @@ def gen_f(N, T, t, num):
     return(fs)
 
 """
+Drift of a storm at (clon, clat) that the monthly environmental flow does not explain
+Beta drift is part of it, but not all: the zonal part differs between regions by more than 2 m/s, the same at
+the weak stage and the storm stage (monsoon-trough regions, where parent disturbances hardly propagate, against trade-wind
+regions, where they travel west), and fades towards the westerlies. The poleward part is flat at low latitudes and grows
+beyond drift_lat0, where storms recurve around the subtropical ridge.
+"""
+def drift_speed(clon, clat):
+    lats = np.abs(clat)
+    nodes, values = namelist.u_drift_nh if clat >= 0 else namelist.u_drift_sh
+    u = np.interp(clon % 360., nodes, values, period = 360.)
+    u *= np.clip((namelist.u_drift_lat1 - lats) / (namelist.u_drift_lat1 - namelist.u_drift_lat0), 0., 1.)
+    slope = namelist.v_beta_slope if clat >= 0 else namelist.v_beta_slope_sh
+    w = namelist.v_beta + slope * max(0., lats - namelist.drift_lat0) / 30.
+    w += getattr(namelist, 'v_beta_low', 0.) * np.clip((namelist.v_beta_low_lat1 - lats) / (namelist.v_beta_low_lat1 - namelist.v_beta_low_lat0), 0., 1.)
+    regional = getattr(namelist, 'v_drift_nh' if clat >= 0 else 'v_drift_sh', None)
+    if regional is not None:
+        w += np.interp(clon % 360., regional[0], regional[1], period = 360.) * np.clip((namelist.u_drift_lat1 - lats) / (namelist.u_drift_lat1 - namelist.u_drift_lat0), 0., 1.)
+    # Drift never carries a storm towards the equator
+    return (u, np.sign(clat) * max(w, 0.))
+
+"""
 Seed the generator. Advantage of this method is that processes that
 run close to each other will have very different seeds.
 """
@@ -55,8 +76,8 @@ class BetaAdvectionTrack:
         self.total_steps = int(self.total_time / self.dt_track) + 1
         self.t_s = np.linspace(0, self.total_time, int(self.total_time / self.dt_track) + 1)
         self.T_Fs = namelist.T_days*24*60*60    # period of the fourier series
-        self.u_beta = namelist.u_beta           # zonal beta drift speed
-        self.v_beta = namelist.v_beta           # meridional beta drift speed
+        # Fraction of the synthetic wind fluctuation that steers the storm
+        self.steer_fluct_scale = getattr(namelist, 'steer_fluct_scale', 1.0)
         self.nLvl = len(namelist.steering_levels)
         self.nWLvl = self.nLvl * 2
         self.dt_start = dt_start.astype('datetime64[ns]')
@@ -113,20 +134,23 @@ class BetaAdvectionTrack:
         N_series = 15                       # number of sine waves
         return(gen_f(N_series, self.T_Fs, self.t_s, self.nWLvl))
 
-    """ Calculate environmental winds at a point and time. """
-    def _env_winds(self, clon, clat, ts):
+    """ Calculate environmental winds at a point and time.
+    With parts = True, returns (winds, mean winds, fluctuation) instead """
+    def _env_winds(self, clon, clat, ts, parts = False):
         if np.isnan(clon) or np.isnan(ts):
-            return np.zeros(self.nWLvl)
+            zeros = np.zeros(self.nWLvl)
+            return (zeros, zeros, zeros) if parts else zeros
 
         ct = self.datetime_start + datetime.timedelta(seconds = ts)
         wnd_mean, wnd_cov = self.interp_wnd_mean_cov(clon, clat, ct)
         try:
             wnd_A = np.linalg.cholesky(wnd_cov)
+            wnd_fluct = np.matmul(wnd_A, self.Fs_i(ts))
         except np.linalg.LinAlgError as err:
-            print(self.dt_start)
-            return np.zeros(self.nWLvl)
-        wnds = wnd_mean + np.matmul(wnd_A, self.Fs_i(ts))
-        return wnds
+            # Covariance is not positive definite here (rare): use the mean wind
+            wnd_fluct = np.zeros(self.nWLvl)
+        wnds = wnd_mean + wnd_fluct
+        return (wnds, wnd_mean, wnd_fluct) if parts else wnds
 
     """ Calculate the translational speeds from the beta advection model """
     def _step_bam_track(self, clon, clat, ts, steering_coefs):
@@ -134,14 +158,15 @@ class BetaAdvectionTrack:
         # Ensures that solve_ivp does not go past the domain bounds.
         if np.abs(clat) >= 80:
             return (np.zeros(2), np.zeros(self.nWLvl))
-        wnds = self._env_winds(clon, clat, ts)
+        wnds, wnd_mean, wnd_fluct = self._env_winds(clon, clat, ts, parts = True)
+        fluct = self.steer_fluct_scale * wnd_fluct
+        steer = wnd_mean + fluct
 
         v_bam = np.zeros(2)
-        w_lat = np.cos(np.deg2rad(clat))
-        v_beta_sgn = np.sign(clat) * self.v_beta
+        u_drift, v_drift = drift_speed(clon, clat)
 
-        v_bam[0] = np.dot(wnds[self.u_Mean_idxs], steering_coefs) + self.u_beta * w_lat
-        v_bam[1] = np.dot(wnds[self.v_Mean_idxs], steering_coefs) + v_beta_sgn * w_lat
+        v_bam[0] = np.dot(steer[self.u_Mean_idxs], steering_coefs) + u_drift
+        v_bam[1] = np.dot(steer[self.v_Mean_idxs], steering_coefs) + v_drift
         return(v_bam, wnds)
 
     """ Calculate the steering coefficients. """

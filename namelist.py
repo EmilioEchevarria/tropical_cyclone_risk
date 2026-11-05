@@ -99,8 +99,23 @@ y_alpha = [0.113, 0.434, 0.041]       # value of steering coefficient at 0 knots
 m_alpha = [0.00138, -0.00032, 0.00086]  # change of each coefficient per unit storm intensity, 1 / kts
 alpha_max = [0.28, 0.44, 0.12]        # maximum value of each steering coefficient (coupled track only)
 alpha_min = [0.14, 0.36, 0.05]        # minimum value of each steering coefficient (coupled track only)
-u_beta = -1.0                         # zonal beta drift, m/s
-v_beta = 2.5                          # meridional beta drift, m/s
+
+# Drift fitted on observed storm motion (IBTrACS 1981-2000, checked on 2001-2025) 
+u_drift_nh = ([20, 40, 95, 105, 175, 185, 260, 275], [-0.69, -0.14, -0.14, -1.28, -1.28, -1.29, -1.29, -0.69])
+u_drift_sh = ([20, 100, 110, 175, 185, 260], [-1.02, -1.02, 0.2, 0.2, 0.5, 0.5])
+u_drift_lat0 = 20.                    # the zonal drift fades to zero between these latitudes
+u_drift_lat1 = 40.
+v_beta = 1.6                          # poleward drift at low latitudes, m/s
+v_beta_slope = 2.5                    # growth of the poleward drift per 30 degrees of latitude beyond drift_lat0, m/s
+v_beta_slope_sh = -2.7                # the same in the Southern Hemisphere, where the motion as run asks for less beyond 15 degrees
+v_beta_low = 0.8                      # extra poleward drift near the equator, m/s, fading between these latitudes
+v_beta_low_lat0 = 6.
+v_beta_low_lat1 = 13.
+drift_lat0 = 15.
+v_drift_nh = ([20, 95, 105, 120, 135, 175, 185, 345], [-0.3, -0.3, 0.0, 0.0, 0.4, 0.4, 0.0, 0.0])
+v_drift_sh = ([20, 100, 110, 150, 170, 185, 260, 340], [0.55, 0.55, 0.0, 0.0, 0.7, 1.8, 1.8, 0.55])
+steer_fluct_scale = 1.4               # fraction of the synthetic wind fluctuation that steers the storm
+
 T_days = 30                           # period of the fourier series, days
 fluct_spectrum_exponent = 0.7
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
