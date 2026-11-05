@@ -170,6 +170,22 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         chi = self._calc_chi(clon, clat)
         return (self._calc_S(env_wnds) * chi)
 
+    """ Ventilation of a vortex of intensity v (m/s) at latitude clat, relative to a vortex of bl_v_ref_ms at
+    f = 5e-5 /s. Shear and the dry air it brings in matter less the stiffer the circulation is, ventilation ~ I^(-1/2)
+    (the Ekman scaling of the inflow layer that downdrafts flush), with I = sqrt((f + 2u/r)(f + u/r)) at r = vent_radius_km,
+    outside the eyewall, where u = v (bl_rmw_km / r)^(1/2). Vortices weaker than bl_v_ref_ms feel only the change in f,
+    which is held below 3 degrees latitude. """
+    def _vent_factor(self, v, clat):
+        exponent = getattr(namelist, 'vent_inertial_exponent', 0.0)
+        if exponent == 0:
+            return 1.0
+        r = namelist.vent_radius_km * 1000.
+        shape = np.sqrt(namelist.bl_rmw_km / namelist.vent_radius_km)
+        inertial = lambda u, f: np.sqrt((f + 2 * shape * u / r) * (f + shape * u / r))
+        f = 2 * 7.292e-5 * max(abs(np.sin(np.deg2rad(clat))), np.sin(np.deg2rad(3.)))
+        v_ref = namelist.bl_v_ref_ms
+        return (inertial(v_ref, 5e-5) / inertial(max(v, v_ref), f)) ** exponent
+
     """ Define the first ODE in the coupled set, Equation 2.
     For now, use a drag coefficient, constant boundary layer depth,
     constant thermodynamic efficiency (Equation 8), and constant
@@ -224,7 +240,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     However, environmental wind shear (S) still varies with time.
     """
     def _dmdt(self,  clon, clat, v, m, env_wnds, t):
-        venti = self._calc_venti(t, clon, clat, env_wnds)
+        venti = self._calc_venti(t, clon, clat, env_wnds) * self._vent_factor(v, clat)
         # In Emanuel (2012), Emanuel (2017), there are differing expressions for
         # the intensification rate. It seems Ck and Cd are used interchangeably.
         # Here, in lieu of Ck, we use Cd, and include a variable drag coefficient 

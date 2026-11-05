@@ -161,8 +161,8 @@ bl_v_ref_ms = 18.0                    # intensity below which ventilation (and t
 bl_rmw_km = 50.0                      # radius of maximum wind used for the inertial stability, km
 log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
-# Over water a vortex spins down this many times faster than the rate atm_bl_depth gives, which is set by spin-up (so spin-down
-# runs at a depth of about 1470 m, close to Emanuel's 1400 m). Set against observed 24-hour wind losses after best-track error.
+vent_inertial_exponent = 0.75
+vent_radius_km = 150.0
 spindown_fac = 1.5
 
 # Upper-ocean maps of the ocean feedback, from World Ocean Atlas 2023 (scripts/build_ocean_maps.py), 
