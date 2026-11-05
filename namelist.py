@@ -70,7 +70,7 @@ end_month = 12                        # month of end_year to stop downscaling
 These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
-total_track_time_days = 15            # total time to integrate tracks, days
+total_track_time_days = 25            # total time to integrate tracks, days (the original 15 cut 16% of tracks while still storms, 7% as hurricanes)
 tracks_per_year = 20                  # total number of tracks to simulate per year
 
 """
