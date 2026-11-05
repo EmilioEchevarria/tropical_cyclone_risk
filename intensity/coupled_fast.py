@@ -50,6 +50,9 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
     """ Return the current drag coefficient at a position. """
     def _get_current_Cd(self, clon, clat):
+        # As in Emanuel (2017), the drag rises at landfall: a centre still over the sea keeps the over-ocean value.
+        if getattr(namelist, 'land_drag_on_land_only', False) and (self.f_land.ev(clon, clat).flatten()[0] < 0.5):
+            return namelist.Cd
         return (self.f_Cd.ev(clon, clat).flatten()[0])
 
     """ Return the current sub-mixed layer thermal stratification, (K / 100 m)
@@ -230,8 +233,14 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            dvdt = (0.5 * Cd / self._h_bl(v, clat) * (alpha * beta * (v_pot ** 2) * (m ** 3) -
-                                                 (1 - gamma * (m ** 3)) * (v ** 2)))
+            if getattr(namelist, 'land_drag_friction_only', False):
+                # Rough land raises friction, not the energy supply, so the growth term keeps the over-ocean coefficient. On rough
+                # cells next to the sea potential intensity is still full, and a growth term scaled by the land's drag gains 20 kt in an hour.
+                dvdt = (0.5 / self._h_bl(v, clat) * (namelist.Cd * alpha * beta * (v_pot ** 2) * (m ** 3) -
+                                                     Cd * (1 - gamma * (m ** 3)) * (v ** 2)))
+            else:
+                dvdt = (0.5 * Cd / self._h_bl(v, clat) * (alpha * beta * (v_pot ** 2) * (m ** 3) -
+                                                     (1 - gamma * (m ** 3)) * (v ** 2)))
         # Over water, friction spins the vortex down faster than the rate h_bl gives, which is set by spin-up: only part of
         # the convective heating goes into spinning the vortex up. Land keeps its own drag.
         if (dvdt < 0) and not self._get_over_land(clon, clat):

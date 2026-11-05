@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 
 from scipy.interpolate import RectBivariateSpline as interp2d
+from scipy.ndimage import gaussian_filter
 
 import namelist
 
@@ -51,6 +52,11 @@ def read_drag(basin):
     Cd_gradient = Cd / (1 + 250.0 * Cd)
     Cd_norm = Cd_gradient / np.min(Cd_gradient)
     Cd = namelist.Cd * Cd_norm
+
+    # A storm's core feels the drag averaged over its own area, not the value of one small cell.
+    smooth_km = getattr(namelist, 'drag_smooth_km', 0.0)
+    if smooth_km > 0:
+        Cd = gaussian_filter(Cd, smooth_km / 111.0 / abs(lat[1] - lat[0]), mode = ('nearest', 'wrap'))
 
     lon_b, lat_b, Cd_b = basin.transform_global_field(lon, lat, Cd)
     f_Cd = interp2d(lon_b, lat_b, Cd_b.T, kx=1, ky=1)

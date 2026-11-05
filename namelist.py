@@ -181,6 +181,11 @@ ocean_f_exponent = 0.59
 shelf_radius_km = 100.0
 ocean_motion_tau_hours = 12.0
 
+# Land drag
+land_drag_on_land_only = True
+land_drag_friction_only = True
+drag_smooth_km = 0.0
+
 # Wind asymmetry parameters: How much motion and shear add to the strongest wind
 # Values are the amplitudes measured in TC wind fields by Chang, Amin and Emanuel (2020): 1.17 + 0.40 x speed and about 0.1 x shear
 wind_asym_base = 1.17
