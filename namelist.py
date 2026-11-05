@@ -164,6 +164,8 @@ chi_fac = 1.3                         # addition to chi
 # instead of the original Levitus (1982)
 ocean_mld_file = '%s/intensity/data/mld_climatology_woa23.nc' % src_directory
 ocean_strat_file = '%s/intensity/data/strat_climatology_woa23.nc' % src_directory
+# Latitude dependence of the ocean feedback, z ~ f^ocean_f_exponent (Schade and Emanuel 1999).
+ocean_f_exponent = 0.59
 
 # Wind asymmetry parameters: How much motion and shear add to the strongest wind
 # Values are the amplitudes measured in TC wind fields by Chang, Amin and Emanuel (2020): 1.17 + 0.40 x speed and about 0.1 x shear

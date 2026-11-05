@@ -80,12 +80,22 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         if (bathymetry >= 0 or -h_m <= bathymetry or t_strat == 0):
             return(1)
         else:
-            z = self._calc_z(v, h_m, v_pot, u_T, t_strat)
+            z = self._calc_z(v, h_m, v_pot, u_T, t_strat) * self._ocean_f_factor(clat)
             try:
                 fac = np.exp(-np.clip(z, 0, 100))
             except OverflowError:
                 fac = np.nan
             return(1 - 0.87 * fac)
+
+    """ Latitude dependence of the ocean feedback in the fit of Schade and Emanuel (1999), z ~ f^0.59 
+    Where the Earth's rotation is weaker, near-inertial currents grow larger and mix up more cold water. 
+    Held below 5 degrees latitude, outside the range the fit explored. """
+    def _ocean_f_factor(self, clat):
+        exponent = getattr(namelist, 'ocean_f_exponent', 0.0)
+        if exponent == 0:
+            return 1.0
+        f = 2 * 7.292e-5 * max(abs(np.sin(np.deg2rad(clat))), np.sin(np.deg2rad(5.)))
+        return (f / 5e-5) ** exponent
 
     """ Calculate z (Equation 5) at a time t.
     v is the current intensity in m/s.
