@@ -193,6 +193,10 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
             warnings.simplefilter("ignore", category=RuntimeWarning)
             dvdt = (0.5 * Cd / self._h_bl(v, clat) * (alpha * beta * (v_pot ** 2) * (m ** 3) -
                                                  (1 - gamma * (m ** 3)) * (v ** 2)))
+        # Over water, friction spins the vortex down faster than the rate h_bl gives, which is set by spin-up: only part of
+        # the convective heating goes into spinning the vortex up. Land keeps its own drag.
+        if (dvdt < 0) and not self._get_over_land(clon, clat):
+            dvdt = dvdt * getattr(namelist, 'spindown_fac', 1.0)
         return dvdt if ~np.isnan(dvdt) else 0
 
     """ Initializes m if no m has been given. Assumes an initial dvdt. """
