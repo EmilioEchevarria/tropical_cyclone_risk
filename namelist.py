@@ -167,6 +167,13 @@ wind_asym_motion = 0.40
 wind_asym_shear = 0.1
 wind_asym_shear_v = False
 
+# Storm crowding (util/crowding.py): the share of new storms suppressed at these distances from an active storm
+# Empirical fit from IBTrACS obs (1981-2025) 
+crowd_km = [250.0, 750.0, 1250.0, 1600.0]
+crowd_suppress = [0.98, 0.85, 0.34, 0.0]
+crowd_storms_per_year = 90.8
+crowd_constant = None
+
 lat_vort_fac = 2                      # sets where vorticity threshold decays toward equator
 lat_vort_power = {'NA': 6, 'EP': 6,   # power decay towards the equator
                   'WP': 3.5, 'AU': 6,

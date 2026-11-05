@@ -16,7 +16,7 @@ from intensity import coupled_fast, ocean
 from thermo import calc_thermo
 from track import env_wind, wiggle
 from wind import tc_wind
-from util import basins, input, mat, seeds, tc_tracker
+from util import basins, crowding, input, mat, seeds, tc_tracker
 
 """
 Driver function to compute zonal and meridional wind monthly mean and
@@ -286,6 +286,10 @@ def run_downscaling(basin_id):
     basin_ids = sorted([k for k in namelist.basin_bounds if k != 'GL'])
 
     env_names = env_wind.wind_mean_vector_names()
+    # Chance each storm survives crowding by the other storms
+    crowd_keep, crowd_K = crowding.keep_probability(tc_lon, tc_lat, tc_vmax, tc_years, tc_months, yr_trks, n_seeds.sum(axis = (1, 2)),
+                                                    K = namelist.crowd_constant, storms_per_year = namelist.crowd_storms_per_year,
+                                                    output_step_hours = namelist.output_interval_s / 3600.)
     ds = xr.Dataset(data_vars = dict(lon_trks = (["n_trk", "time"], tc_lon),
                                      lat_trks = (["n_trk", "time"], tc_lat),
                                      u250_trks = (["n_trk", "time"], tc_env_wnds[:, :, env_names.index('ua250_Mean')]),
@@ -298,11 +302,13 @@ def run_downscaling(basin_id):
                                      tc_month = (["n_trk"], tc_months),
                                      tc_basins = (["n_trk"], tc_basins),                                     
                                      tc_years = (["n_trk"], tc_years),
+                                     crowd_keep = (["n_trk"], crowd_keep),
                                      seeds_per_month = (["year", "basin", "month"], n_seeds)),
                     coords = dict(n_trk = range(tc_lon.shape[0]), time = ts_output,
                                   year = yr_trks, basin = basin_ids, month = list(range(1, 13))))
 
     os.makedirs('%s/%s' % (namelist.base_directory, namelist.exp_name), exist_ok = True)
     fn_trk_out = fn_tracks_duplicates(get_fn_tracks(b))
+    ds.attrs['crowd_constant'] = crowd_K
     ds.to_netcdf(fn_trk_out, mode = 'w')
     print('Saved %s' % fn_trk_out)
