@@ -14,7 +14,7 @@ import namelist
 from dask.distributed import LocalCluster, Client
 from intensity import coupled_fast, ocean
 from thermo import calc_thermo
-from track import env_wind
+from track import env_wind, wiggle
 from wind import tc_wind
 from util import basins, input, mat, seeds, tc_tracker
 
@@ -236,6 +236,10 @@ def run_tracks(year, n_tracks, b):
                 tc_vmax[nt, 0:n_time] = vmax
                 tc_month[nt] = month_seed
                 tc_basin[nt] = basin_ids[basin_idx]
+                # Empirical wobble goes on last, so it never feeds back into the physics.
+                tc_lon[nt, 0:n_time], tc_lat[nt, 0:n_time] = wiggle.apply_wiggle(
+                    track_lon, track_lat, fast.dt_track,
+                    getattr(namelist, 'wiggle_sigma_km', 0.0), getattr(namelist, 'wiggle_tau_hours', 6.0))
                 nt += 1
     return((tc_lon, tc_lat, tc_v, tc_m, tc_vmax, tc_env_wnds, tc_month, tc_basin, n_seeds))
 

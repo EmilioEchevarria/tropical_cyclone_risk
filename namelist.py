@@ -130,6 +130,10 @@ weak_v_beta_slope = [1.5, 3.0]
 steer_fluct_kt = [64.0, 150.0]
 steer_fluct_fac = [1.0, 0.68]
 
+# Empirical 'wiggliness' of the tracks
+wiggle_sigma_km = 8.0                 # size of the best-track-like wobble added to tracks, km (0 = off)
+wiggle_tau_hours = 6.0                # e-folding time of the wobble, hours
+
 T_days = 30                           # period of the fourier series, days
 fluct_spectrum_exponent = 0.7
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
