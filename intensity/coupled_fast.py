@@ -165,7 +165,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     """ Initializes m if no m has been given. Assumes an initial dvdt. """
     def _init_m(self, y, dvdt):
         steering_coefs = self._calc_steering_coefs(y[2])
-        v_bam, env_wnds = self._step_bam_track(y[0], y[1], 0., steering_coefs)
+        v_bam, env_wnds = self._step_bam_track(y[0], y[1], 0., steering_coefs, y[2])
         v_pot = np.max([self._get_current_vpot(y[0], y[1]),
                         self._get_current_vpot(y[0]-0.25, y[1]-0.25),
                         self._get_current_vpot(y[0]-0.25, y[1]+0.25),
@@ -207,6 +207,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
             steering_coefs = np.maximum(np.minimum(alpha_fx, namelist.alpha_max), namelist.alpha_min)
             if np.any(np.isnan(steering_coefs)):
                 steering_coefs = np.array(namelist.y_alpha)
+            steering_coefs = steering_coefs * bam_track.weak_steer_factors(v)
         else:
             steering_coefs = np.array(namelist.steering_coefs)
         return steering_coefs
@@ -215,7 +216,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     y[0] is longitude, y[1] is latitude, y[2] is v, and y[3] is m."""
     def dydt(self, t, y):
         steering_coefs = self._calc_steering_coefs(y[2])
-        v_bam, env_wnds = self._step_bam_track(y[0], y[1], t, steering_coefs)
+        v_bam, env_wnds = self._step_bam_track(y[0], y[1], t, steering_coefs, y[2])
         dLondt = v_bam[0] / constants.earth_R * 180. / np.pi / (np.cos(y[1] * np.pi / 180.))
         dLatdt = v_bam[1] / constants.earth_R * 180. / np.pi
 

@@ -32,23 +32,37 @@ def gen_f(N, T, t, num):
     return(fs)
 
 """
+Weak vortices (below TC strength) are shallower and follow a small fraction of the deep flow and lean
+on the low-level wind, and they drift differently (fitted on IBTrACS). 
+_weak_value interpolates a quantity given at the first weak_vortex_kt points to its value at TC strength
+"""
+def _weak_value(v, values, strong):
+    kts = getattr(namelist, 'weak_vortex_kt', None)
+    if (v is None) or (not kts) or np.isnan(v):
+        return strong
+    return float(np.interp(v * 1.94384, kts, list(values) + [strong]))
+
+def weak_steer_factors(v):
+    return np.array([_weak_value(v, f, 1.0) for f in namelist.weak_alpha_fac])
+
+"""
 Drift of a storm at (clon, clat) that the monthly environmental flow does not explain
 Beta drift is part of it, but not all: the zonal part differs between regions by more than 2 m/s, the same at
 the weak stage and the storm stage (monsoon-trough regions, where parent disturbances hardly propagate, against trade-wind
 regions, where they travel west), and fades towards the westerlies. The poleward part is flat at low latitudes and grows
 beyond drift_lat0, where storms recurve around the subtropical ridge.
 """
-def drift_speed(clon, clat):
+def drift_speed(v, clon, clat):
     lats = np.abs(clat)
     nodes, values = namelist.u_drift_nh if clat >= 0 else namelist.u_drift_sh
-    u = np.interp(clon % 360., nodes, values, period = 360.)
+    u = np.interp(clon % 360., nodes, values, period = 360.) + _weak_value(v, namelist.weak_u_drift, 0.)
     u *= np.clip((namelist.u_drift_lat1 - lats) / (namelist.u_drift_lat1 - namelist.u_drift_lat0), 0., 1.)
     slope = namelist.v_beta_slope if clat >= 0 else namelist.v_beta_slope_sh
-    w = namelist.v_beta + slope * max(0., lats - namelist.drift_lat0) / 30.
+    w = _weak_value(v, namelist.weak_v_beta, namelist.v_beta) + _weak_value(v, namelist.weak_v_beta_slope, slope) * max(0., lats - namelist.drift_lat0) / 30.
     w += getattr(namelist, 'v_beta_low', 0.) * np.clip((namelist.v_beta_low_lat1 - lats) / (namelist.v_beta_low_lat1 - namelist.v_beta_low_lat0), 0., 1.)
     regional = getattr(namelist, 'v_drift_nh' if clat >= 0 else 'v_drift_sh', None)
     if regional is not None:
-        w += np.interp(clon % 360., regional[0], regional[1], period = 360.) * np.clip((namelist.u_drift_lat1 - lats) / (namelist.u_drift_lat1 - namelist.u_drift_lat0), 0., 1.)
+        w += _weak_value(v, [0., 0.], np.interp(clon % 360., regional[0], regional[1], period = 360.)) * np.clip((namelist.u_drift_lat1 - lats) / (namelist.u_drift_lat1 - namelist.u_drift_lat0), 0., 1.)
     # Drift never carries a storm towards the equator
     return (u, np.sign(clat) * max(w, 0.))
 
@@ -152,8 +166,9 @@ class BetaAdvectionTrack:
         wnds = wnd_mean + wnd_fluct
         return (wnds, wnd_mean, wnd_fluct) if parts else wnds
 
-    """ Calculate the translational speeds from the beta advection model """
-    def _step_bam_track(self, clon, clat, ts, steering_coefs):
+    """ Calculate the translational speeds from the beta advection model.
+    v (m/s, optional) is the storm intensity, used for the weak-vortex beta drift. """
+    def _step_bam_track(self, clon, clat, ts, steering_coefs, v = None):
         # Include a hard stop for latitudes above 80 degrees.
         # Ensures that solve_ivp does not go past the domain bounds.
         if np.abs(clat) >= 80:
@@ -163,7 +178,7 @@ class BetaAdvectionTrack:
         steer = wnd_mean + fluct
 
         v_bam = np.zeros(2)
-        u_drift, v_drift = drift_speed(clon, clat)
+        u_drift, v_drift = drift_speed(v, clon, clat)
 
         v_bam[0] = np.dot(steer[self.u_Mean_idxs], steering_coefs) + u_drift
         v_bam[1] = np.dot(steer[self.v_Mean_idxs], steering_coefs) + v_drift

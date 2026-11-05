@@ -116,6 +116,14 @@ v_drift_nh = ([20, 95, 105, 120, 135, 175, 185, 345], [-0.3, -0.3, 0.0, 0.0, 0.4
 v_drift_sh = ([20, 100, 110, 150, 170, 185, 260, 340], [0.55, 0.55, 0.0, 0.0, 0.7, 1.8, 1.8, 0.55])
 steer_fluct_scale = 1.4               # fraction of the synthetic wind fluctuation that steers the storm
 
+# Weak vortices (below TC strength, e.g. developing seeds) are shallower. Factors on the steering weights (one per
+# steering level) and drift at these winds, from IBTrACS
+weak_vortex_kt = [20.0, 29.5, 34.0]
+weak_alpha_fac = [[0.66, 0.84], [0.52, 0.80], [2.8, 2.5]]
+weak_u_drift = [-0.6, -0.6]
+weak_v_beta = [1.2, 1.2]
+weak_v_beta_slope = [1.5, 3.0]
+
 T_days = 30                           # period of the fourier series, days
 fluct_spectrum_exponent = 0.7
 seed_v_init_ms = 5                    # initial seed v intensity, m/s
