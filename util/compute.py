@@ -281,12 +281,13 @@ def run_downscaling(basin_id):
     yr_trks = np.stack([[x[0]] for x in f_args]).flatten()
     basin_ids = sorted([k for k in namelist.basin_bounds if k != 'GL'])
 
+    env_names = env_wind.wind_mean_vector_names()
     ds = xr.Dataset(data_vars = dict(lon_trks = (["n_trk", "time"], tc_lon),
                                      lat_trks = (["n_trk", "time"], tc_lat),
-                                     u250_trks = (["n_trk", "time"], tc_env_wnds[:, :, 0]),
-                                     v250_trks = (["n_trk", "time"], tc_env_wnds[:, :, 1]),
-                                     u850_trks = (["n_trk", "time"], tc_env_wnds[:, :, 2]),
-                                     v850_trks = (["n_trk", "time"], tc_env_wnds[:, :, 3]),
+                                     u250_trks = (["n_trk", "time"], tc_env_wnds[:, :, env_names.index('ua250_Mean')]),
+                                     v250_trks = (["n_trk", "time"], tc_env_wnds[:, :, env_names.index('va250_Mean')]),
+                                     u850_trks = (["n_trk", "time"], tc_env_wnds[:, :, env_names.index('ua850_Mean')]),
+                                     v850_trks = (["n_trk", "time"], tc_env_wnds[:, :, env_names.index('va850_Mean')]),
                                      v_trks = (["n_trk", "time"], tc_v),
                                      m_trks = (["n_trk", "time"], tc_m),
                                      vmax_trks = (["n_trk", "time"], tc_vmax),

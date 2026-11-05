@@ -91,13 +91,14 @@ These parameters configure track and intensity constants.
 # If 250-, 500-, and 850-hPa, uses three steering levels.
 # The steering_coefficients ('steering_coefs') should have the same 
 # length as the number of levels.
-steering_levels = [250, 850]
-steering_coefs = [0.2, 0.8]           # constant steering coefficients if not coupled
+steering_levels = [250, 700, 850]
+# Weights are fitted on observed TC motion (IBTrACS 1981-2000, checked on 2001-2025) against the monthly environmental winds
+steering_coefs = [0.18, 0.42, 0.08]   # constant steering coefficients if not coupled
 coupled_track = True                  # track coupled to intensity; overrides alpha
-y_alpha = [0.17, 0.83]                # value of steering coefficient at 0 knots
-m_alpha = [0.0025, -0.0025]           # change of each coefficient per unit storm intensity, 1 / kts
-alpha_max = [0.41, 0.78]              # maximum value of each steering coefficient (coupled track only)
-alpha_min = [0.22, 0.59]              # minimum value of each steering coefficient (coupled track only)
+y_alpha = [0.113, 0.434, 0.041]       # value of steering coefficient at 0 knots
+m_alpha = [0.00138, -0.00032, 0.00086]  # change of each coefficient per unit storm intensity, 1 / kts
+alpha_max = [0.28, 0.44, 0.12]        # maximum value of each steering coefficient (coupled track only)
+alpha_min = [0.14, 0.36, 0.05]        # minimum value of each steering coefficient (coupled track only)
 u_beta = -1.0                         # zonal beta drift, m/s
 v_beta = 2.5                          # meridional beta drift, m/s
 T_days = 20                           # period of the fourier series, days

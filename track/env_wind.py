@@ -187,10 +187,7 @@ def calc_wnd_stat(ua, va, dt):
                   (input.convert_to_datetime(ua, ua['time'].values) < tEnd))
 
     lvl = ua[input.get_lvl_key()]
-    if lvl.units in ['millibars', 'hPa']:
-        p_upper = 250; p_lower = 850;
-    else:
-        p_upper = 25000; p_lower = 85000;
+    p_fac = 1 if lvl.units in ['millibars', 'hPa'] else 100
 
     # If time step is less than one day, group by day.
     dt_step = (np.timedelta64(1, 'D') - (ua['time'][1] - ua['time'][0]).data) / np.timedelta64(1, 's')
@@ -204,13 +201,8 @@ def calc_wnd_stat(ua, va, dt):
         t_unit = 'time'
 
     # Compute the daily averages
-    ua250_month = ua_month.sel({input.get_lvl_key(): p_upper})
-    va250_month = va_month.sel({input.get_lvl_key(): p_upper})
-    ua850_month = ua_month.sel({input.get_lvl_key(): p_lower})
-    va850_month = va_month.sel({input.get_lvl_key(): p_lower})
-
-    month_wnds = [ua250_month, va250_month,
-                  ua850_month, va850_month]
+    month_wnds = sum([[ua_month.sel({input.get_lvl_key(): p * p_fac}),
+                       va_month.sel({input.get_lvl_key(): p * p_fac})] for p in namelist.steering_levels], [])
     month_mean_wnds = [0] * len(month_wnds)
     month_var_wnds = [[np.empty(0) for i in range(len(month_wnds))] for j in range(len(month_wnds))]
     for i in range(len(month_wnds)):
