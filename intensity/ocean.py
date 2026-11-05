@@ -3,6 +3,8 @@ import os
 import xarray as xr
 from datetime import datetime
 
+import namelist
+
 """
 Returns climatological mixed layer depth for a given year.
 Returns (lat, lon, t) and mixed layer depth (m),
@@ -10,7 +12,7 @@ with dimensions (lat, lon, t). dt_months is type datetimes.
 """
 def mld_climatology(year, basin):
     f_dir = os.path.dirname(os.path.abspath(__file__))
-    ds = xr.open_dataset('%s/data/mld_climatology.nc' % f_dir)
+    ds = xr.open_dataset(getattr(namelist, 'ocean_mld_file', '') or '%s/data/mld_climatology.nc' % f_dir)
     mld = np.asarray(ds['mixed_layer'])
     mld = np.concatenate((mld, np.expand_dims(mld[:, :, 0], 2)), axis=2)
     lon = np.asarray(ds['lon'])
@@ -40,7 +42,7 @@ for a given year. Returns (lat, lon, t) and thermal stratification
 """
 def strat_climatology(year, basin):
     f_dir = os.path.dirname(os.path.abspath(__file__))
-    ds = xr.open_dataset('%s/data/strat_climatology.nc' % f_dir)
+    ds = xr.open_dataset(getattr(namelist, 'ocean_strat_file', '') or '%s/data/strat_climatology.nc' % f_dir)
     strat = np.asarray(ds['strat'])
     strat = np.concatenate((strat, np.expand_dims(strat[:, :, 0], 2)), axis=2)
     lon = np.asarray(ds['lon'])

@@ -160,6 +160,11 @@ atm_bl_depth = {'NA': 1400.0, 'EP': 1400.0, 'WP': 1800.0, 'AU': 1800.0,
 log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
 
+# Upper-ocean maps of the ocean feedback, from World Ocean Atlas 2023 (scripts/build_ocean_maps.py), 
+# instead of the original Levitus (1982)
+ocean_mld_file = '%s/intensity/data/mld_climatology_woa23.nc' % src_directory
+ocean_strat_file = '%s/intensity/data/strat_climatology_woa23.nc' % src_directory
+
 # Wind asymmetry parameters: How much motion and shear add to the strongest wind
 # Values are the amplitudes measured in TC wind fields by Chang, Amin and Emanuel (2020): 1.17 + 0.40 x speed and about 0.1 x shear
 wind_asym_base = 1.17
