@@ -82,6 +82,8 @@ Ck = 1.2e-3
 Cd = 1.2e-3
 select_thermo = 1   # 1 for pseudoadiabatic, 2 for reversible thermodynamics
 select_interp = 2   # 1 for computation, 2 for interpolation
+# Empirical correction for slow drift of near-surface relative humidity in ERA5 (only)
+pi_rh_drift_years = 3.5
 
 """
 These parameters configure track and intensity constants.

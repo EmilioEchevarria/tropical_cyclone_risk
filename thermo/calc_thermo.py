@@ -12,6 +12,7 @@ import numpy as np
 import xarray as xr
 
 from dask.distributed import LocalCluster, Client
+from scipy.ndimage import gaussian_filter1d
 from util import input, mat
 from thermo import thermo
 
@@ -21,6 +22,44 @@ def get_fn_thermo():
                                                namelist.end_year, namelist.end_month)
     return(fn_th)
 
+
+def get_fn_rh_drift():
+    return '%s/rh_drift_%s.nc' % (namelist.output_directory, namelist.exp_prefix)
+
+"""
+Slow drift of near-surface relative humidity over the tropical oceans in the input data, per year (fraction, zero mean):
+the tropical ocean mean at the lowest level, smoothed with a Gaussian of namelist.pi_rh_drift_years years.
+"""
+def gen_rh_drift():
+    fn_out = get_fn_rh_drift()
+    if (getattr(namelist, 'pi_rh_drift_years', 0) <= 0) or os.path.exists(fn_out):
+        return
+    ds_ta, ds_hus, ds_sst = input.load_temp(), input.load_sp_hum(), input.load_sst()
+    lvl_key, lat_key = input.get_lvl_key(), input.get_lat_key()
+    p0 = float(ds_ta[lvl_key].max())
+    p0_Pa = p0 * 100 if ds_ta[lvl_key].units in ['millibars', 'hPa'] else p0
+    trop = np.abs(ds_ta[lat_key]) <= 30
+    ta = ds_ta[input.get_temp_key()].sel({lvl_key: p0}).sel({lat_key: trop}).load()
+    hus = ds_hus[input.get_sp_hum_key()].sel({lvl_key: p0}).sel({lat_key: trop}).load()
+    ocean = np.isfinite(ds_sst[input.get_sst_key()].sel({lat_key: trop}).data)
+    rh = thermo.conv_q_to_rh(ta.data, hus.data, p0_Pa)
+    wts = np.cos(np.radians(ta[lat_key].data))[None, :, None] * ocean
+    rh_trop = np.sum(rh * wts, axis = (1, 2)) / np.sum(wts, axis = (1, 2))
+    years = np.array([x.year for x in input.convert_to_datetime(ds_ta, ds_ta['time'].values)])
+    uniq = np.unique(years)
+    yearly = np.array([rh_trop[years == y].mean() for y in uniq])
+    drift = gaussian_filter1d(yearly, namelist.pi_rh_drift_years, mode = 'nearest')
+    xr.Dataset(dict(rh_drift = (['year'], drift - drift.mean())), coords = dict(year = uniq)).to_netcdf(fn_out)
+    print('Saved %s' % fn_out)
+
+""" The drift by year as a dictionary, or None when the correction is off. """
+def read_rh_drift():
+    if getattr(namelist, 'pi_rh_drift_years', 0) <= 0:
+        return None
+    ds = xr.open_dataset(get_fn_rh_drift())
+    drift = dict(zip(ds['year'].data.tolist(), ds['rh_drift'].data.tolist()))
+    ds.close()
+    return drift
 
 def compute_thermo(dt_start, dt_end):
     ds_sst = input.load_sst(dt_start, dt_end).load()
@@ -35,6 +74,8 @@ def compute_thermo(dt_start, dt_end):
     vmax = np.zeros(ds_psl[input.get_mslp_key()].shape)
     chi = np.zeros(ds_psl[input.get_mslp_key()].shape)
     rh_mid = np.zeros(ds_psl[input.get_mslp_key()].shape)
+    rh_drift = read_rh_drift()
+    dt_times = input.convert_to_datetime(ds_ta, ds_ta['time'].values)
     for i in range(nTime):
         # Convert all variables to the atmospheric grid.
         sst_interp = mat.interp_2d_grid(ds_sst[lon_ky], ds_sst[lat_ky],
@@ -63,7 +104,13 @@ def compute_thermo(dt_start, dt_end):
             lvl_mid = lvl.sel({input.get_lvl_key(): p_midlevel}, method = 'nearest')
 
         # TODO: Check units of psl, ta, and hus
-        vmax_args = (sst_interp, psl.data, lvl_d, ta.data, hus.data)
+        hus_pi = hus.data
+        if rh_drift is not None:
+            # The air feeding the storm, without the slow drift of near-surface humidity
+            hus_pi = hus.data.copy()
+            rh_low = thermo.conv_q_to_rh(ta.data[0], hus_pi[0], lvl_d[0])
+            hus_pi[0] = hus_pi[0] * np.clip(rh_low - rh_drift[dt_times[i].year], 0.01, 0.99) / rh_low
+        vmax_args = (sst_interp, psl.data, lvl_d, ta.data, hus_pi)
         vmax[i, :, :] = thermo.CAPE_PI_vectorized(*vmax_args)
         ta_midlevel = ta.sel({input.get_lvl_key(): p_midlevel}, method = 'nearest').data
         hus_midlevel = hus.sel({input.get_lvl_key(): p_midlevel}, method = 'nearest').data
@@ -80,6 +127,8 @@ def gen_thermo():
     # TODO: Assert all of the datasets have the same length in time.
     if os.path.exists(get_fn_thermo()):
         return
+
+    gen_rh_drift()
 
     # Load datasets metadata. Since SST is split into multiple files and can
     # cause parallel reads with open_mfdataset to hang, save as a single file.
