@@ -17,7 +17,7 @@ exp_name = 'test'
 # can be either 'netcdf' or 'grib'
 dataset_type = 'ERA5' #'GCM'
 exp_prefix = 'era5' #GFDL-CM4_ssp585_r1i1p1f1'
-file_type = 'grib'
+file_type = 'netcdf'
 
 # Variable naming based on dataset_type.
 # 'sst' is sea-surface temperature (monthly-averaged)
