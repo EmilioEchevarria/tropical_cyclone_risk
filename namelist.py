@@ -166,6 +166,12 @@ vent_radius_km = 150.0
 moisture_rate_fac = 1.57
 spindown_fac = 1.5
 
+# Fluctuations the two FAST equations do not contain
+shear_subscale_ms = 2.5
+shear_subscale_tau_hours = 30.0
+moisture_noise = 0.3
+moisture_noise_tau_hours = 24.0
+
 # Upper-ocean maps of the ocean feedback, from World Ocean Atlas 2023 (scripts/build_ocean_maps.py), 
 # instead of the original Levitus (1982)
 ocean_mld_file = '%s/intensity/data/mld_climatology_woa23.nc' % src_directory

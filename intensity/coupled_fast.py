@@ -165,10 +165,33 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         inertial = lambda u: np.sqrt((f + 2 * u / r) * (f + u / r))
         return self.h_bl * np.sqrt(inertial(v_ref) / inertial(v))
 
-    """ Calculate the ventilation. """
+    """ Calculate the ventilation. The vortex also feels shear on scales the smoothed environmental winds leave out. """
     def _calc_venti(self, t, clon, clat, env_wnds):
         chi = self._calc_chi(clon, clat)
-        return (self._calc_S(env_wnds) * chi)
+        shr = self._calc_env_wnd_to_shr(env_wnds)
+        if self.shear_noise is not None:
+            shr = shr + np.array([np.interp(t, self.noise_t_s, self.shear_noise[0]),
+                                  np.interp(t, self.noise_t_s, self.shear_noise[1])])
+        return (np.linalg.norm(shr) * chi)
+
+    """ Unit-variance red noise with e-folding time tau_hours, on the grid noise_t_s. """
+    def _red_noise(self, tau_hours):
+        r = np.exp(-(self.noise_t_s[1] - self.noise_t_s[0]) / (tau_hours * 3600.))
+        x = np.random.standard_normal(self.noise_t_s.size)
+        x[1:] *= np.sqrt(1 - r ** 2)
+        for i in range(1, x.size):
+            x[i] += r * x[i - 1]
+        return x
+
+    """ Draw the fluctuations a track feels: the shear on scales the environmental winds leave out (zonal, meridional,
+    m/s) and the fluctuating supply of inner-core moisture (see _dmdt). """
+    def _gen_noise(self):
+        self.noise_t_s = np.arange(0, self.total_time + 3 * 3600., 3 * 3600.)
+        sigma_s = getattr(namelist, 'shear_subscale_ms', 0.0)
+        sigma_m = getattr(namelist, 'moisture_noise', 0.0)
+        self.shear_noise = None if sigma_s == 0 else \
+            sigma_s * np.array([self._red_noise(namelist.shear_subscale_tau_hours) for _ in range(2)])
+        self.moisture_noise = None if sigma_m == 0 else sigma_m * self._red_noise(namelist.moisture_noise_tau_hours)
 
     """ Ventilation of a vortex of intensity v (m/s) at latitude clat, relative to a vortex of bl_v_ref_ms at
     f = 5e-5 /s. Shear and the dry air it brings in matter less the stiffer the circulation is, ventilation ~ I^(-1/2)
@@ -249,7 +272,12 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            dmdt = 0.5 * Cd / self._h_bl(v, clat) * ((1 - m) * v - venti * m)
+            supply = (1 - m) * v
+            if self.moisture_noise is not None:
+                # Convective organisation and inner-core asymmetries make the supply of inner-core moisture fluctuate.
+                # The noise has the moisture equation's own rate scale and vanishes at m = 0 and m = 1, which keeps m in bounds.
+                supply += v * np.interp(t, self.noise_t_s, self.moisture_noise) * 4 * m * (1 - m)
+            dmdt = 0.5 * Cd / self._h_bl(v, clat) * (supply - venti * m)
         return(dmdt * getattr(namelist, 'moisture_rate_fac', 1.0))
 
     """ Calculate the steering coefficients. """
@@ -311,6 +339,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         # Create the weights for the beta-advection model (across time).
         self.Fs = self.gen_synthetic_f()
         self.Fs_i = interp1d(self.t_s, self.Fs, axis = 1)
+        self._gen_noise()
 
         # If the ventilation index is above some threshold, do not integrate.
         S = self._calc_S(self._env_winds(clon, clat, 0))
