@@ -77,8 +77,10 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         bathymetry = self._get_current_bathymetry(clon, clat)
 
         # When over land, h_m = NaN, so we make alpha = 1.
-        if (bathymetry >= 0 or -h_m <= bathymetry or t_strat == 0):
+        if (bathymetry >= 0):
             return(1)
+        elif (-h_m <= bathymetry or t_strat == 0):
+            return self._alpha_shallow(v, u_T, -bathymetry if h_m <= 0 else min(h_m, -bathymetry))
         else:
             z = self._calc_z(v, h_m, v_pot, u_T, t_strat) * self._ocean_f_factor(clat)
             try:
@@ -86,6 +88,17 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
             except OverflowError:
                 fac = np.nan
             return(1 - 0.87 * fac)
+
+    """ Ocean feedback where no colder water can be mixed up (the mixed layer reaches the sea floor): the surface enthalpy flux
+    still cools the whole column of depth D (m) while the storm passes over a width 2 r, with r = shelf_radius_km. Cooling dT = F (2 r / u_T) /
+    (rho_w c_w D) with F = rho_a Ck v dk takes dk*/dT dT from the air-sea enthalpy difference dk, so alpha = 1 - dk*/dT dT / dk, in which dk cancels. """
+    def _alpha_shallow(self, v, u_T, depth):
+        r = getattr(namelist, 'shelf_radius_km', 0.0) * 1000.
+        if (r <= 0) or (depth <= 0):
+            return(1)
+        rho_a, rho_w, c_w, dkdT = 1.15, 1025., 4000., 4800.
+        cool = rho_a * self.Ck * max(v, 0.) * (2 * r / max(u_T, 0.5)) * dkdT / (rho_w * c_w * depth)
+        return(max(1 - cool, 0.13))
 
     """ Latitude dependence of the ocean feedback in the fit of Schade and Emanuel (1999), z ~ f^0.59 
     Where the Earth's rotation is weaker, near-inertial currents grow larger and mix up more cold water. 
