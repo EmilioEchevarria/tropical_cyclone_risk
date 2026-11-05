@@ -124,6 +124,12 @@ weak_u_drift = [-0.6, -0.6]
 weak_v_beta = [1.2, 1.2]
 weak_v_beta_slope = [1.5, 3.0]
 
+# Storms lean more on the deep flow as they strengthen, but not on its day-to-day swings. Regressing IBTrACS motion on the daily environmental wind anomaly at 250, 700, 850 hPa gives
+# about .12, .40, -.05 at every strength, with the total falling from .51 up to 64 kt to .43 at 96-137 kt and .35 above; the spread of motion falls with strength in the same way. So from
+# tropical-storm strength on the weights on the swings stay at their value there, times steer_fluct_fac (steer_fluct_kt: where it applies, linear in between, kt). None: the steering weights themselves (the original).
+steer_fluct_kt = [64.0, 150.0]
+steer_fluct_fac = [1.0, 0.68]
+
 T_days = 30                           # period of the fourier series, days
 fluct_spectrum_exponent = 0.7
 seed_v_init_ms = 5                    # initial seed v intensity, m/s

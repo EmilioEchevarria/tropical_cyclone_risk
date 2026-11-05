@@ -46,6 +46,19 @@ def weak_steer_factors(v):
     return np.array([_weak_value(v, f, 1.0) for f in namelist.weak_alpha_fac])
 
 """
+Weights on the day-to-day wind swings for a storm of intensity v (m/s). 
+Storms lean more on the deep flow as they strengthen, but not on its swings: the share 
+of the daily wind anomaly a storm follows stays the same at each level and falls in total with strength
+Below tropical storm strength, and when not configured, they are steering_coefs.
+"""
+def fluct_coefs(v, steering_coefs):
+    kts = getattr(namelist, 'steer_fluct_kt', None)
+    if (not kts) or (v is None) or np.isnan(v) or (v * 1.94384 < 34.):
+        return steering_coefs
+    at_ts = np.clip(34. * np.array(namelist.m_alpha) + np.array(namelist.y_alpha), namelist.alpha_min, namelist.alpha_max)
+    return at_ts * np.interp(v * 1.94384, kts, namelist.steer_fluct_fac)
+
+"""
 Drift of a storm at (clon, clat) that the monthly environmental flow does not explain
 Beta drift is part of it, but not all: the zonal part differs between regions by more than 2 m/s, the same at
 the weak stage and the storm stage (monsoon-trough regions, where parent disturbances hardly propagate, against trade-wind
@@ -176,12 +189,13 @@ class BetaAdvectionTrack:
         wnds, wnd_mean, wnd_fluct = self._env_winds(clon, clat, ts, parts = True)
         fluct = self.steer_fluct_scale * wnd_fluct
         steer = wnd_mean + fluct
+        coefs_f = fluct_coefs(v, steering_coefs) - steering_coefs
 
         v_bam = np.zeros(2)
         u_drift, v_drift = drift_speed(v, clon, clat)
 
-        v_bam[0] = np.dot(steer[self.u_Mean_idxs], steering_coefs) + u_drift
-        v_bam[1] = np.dot(steer[self.v_Mean_idxs], steering_coefs) + v_drift
+        v_bam[0] = np.dot(steer[self.u_Mean_idxs], steering_coefs) + np.dot(fluct[self.u_Mean_idxs], coefs_f) + u_drift
+        v_bam[1] = np.dot(steer[self.v_Mean_idxs], steering_coefs) + np.dot(fluct[self.v_Mean_idxs], coefs_f) + v_drift
         return(v_bam, wnds)
 
     """ Calculate the steering coefficients. """
