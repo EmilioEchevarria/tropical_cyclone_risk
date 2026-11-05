@@ -155,6 +155,16 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
     def _calc_chi(self, clon, clat):
         return self.f_chi.ev(clon, clat).flatten()[0]
 
+    """ Boundary-layer depth (m) for a vortex of intensity v (m/s) at latitude clat. """
+    def _h_bl(self, v, clat):
+        v_ref = namelist.bl_v_ref_ms
+        if not (v > v_ref):
+            return self.h_bl
+        f = 2 * 7.292e-5 * abs(np.sin(np.deg2rad(clat)))
+        r = namelist.bl_rmw_km * 1000.
+        inertial = lambda u: np.sqrt((f + 2 * u / r) * (f + u / r))
+        return self.h_bl * np.sqrt(inertial(v_ref) / inertial(v))
+
     """ Calculate the ventilation. """
     def _calc_venti(self, t, clon, clat, env_wnds):
         chi = self._calc_chi(clon, clat)
@@ -181,7 +191,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            dvdt = (0.5 * Cd / self.h_bl * (alpha * beta * (v_pot ** 2) * (m ** 3) -
+            dvdt = (0.5 * Cd / self._h_bl(v, clat) * (alpha * beta * (v_pot ** 2) * (m ** 3) -
                                                  (1 - gamma * (m ** 3)) * (v ** 2)))
         return dvdt if ~np.isnan(dvdt) else 0
 
@@ -199,7 +209,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
         beta = self._calc_beta()
 
         Cd = self._get_current_Cd(clon, clat)
-        numer = 2 * self.h_bl / Cd * dvdt + (y[2] ** 2)
+        numer = 2 * self._h_bl(y[2], y[1]) / Cd * dvdt + (y[2] ** 2)
         denom = alpha * beta * (v_pot ** 2) + gamma * (y[2] ** 2)
         return(np.maximum(np.minimum(np.cbrt(numer / denom), 1), 0))
 
@@ -219,7 +229,7 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            dmdt = 0.5 * Cd / self.h_bl * ((1 - m) * v - venti * m)
+            dmdt = 0.5 * Cd / self._h_bl(v, clat) * ((1 - m) * v - venti * m)
         return(dmdt)
 
     """ Calculate the steering coefficients. """

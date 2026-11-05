@@ -154,9 +154,11 @@ seed_tc_radius_km = 1200.0            # radius left out around each storm, km
 seed_smooth_deg = 1.5                 # Gaussian smoothing of the monthly seed-day frequency, degrees
 seed_density_ref = 0.6                # seed-day frequency at which every draw would develop (only sets run time)
 
-# Atmospheric boundary layer depth (FAST), m
-atm_bl_depth = {'NA': 1400.0, 'EP': 1400.0, 'WP': 1800.0, 'AU': 1800.0,
-                'SI': 1600.0, 'SP': 2000.0, 'NI': 1500.0}
+# Atmospheric boundary layer depth (FAST), in meters. Sets how fast storms intensify and decay (rate ~ 1/depth)
+atm_bl_depth = {'NA': 2200.0, 'EP': 2200.0, 'WP': 2200.0, 'AU': 2200.0,
+                'SI': 2200.0, 'SP': 2200.0, 'NI': 2200.0}
+bl_v_ref_ms = 18.0                    # intensity below which ventilation (and the depth above) ignores v, m/s
+bl_rmw_km = 50.0                      # radius of maximum wind used for the inertial stability, km
 log_chi_fac = 0.5                     # addition to chi in log space
 chi_fac = 1.3                         # addition to chi
 
