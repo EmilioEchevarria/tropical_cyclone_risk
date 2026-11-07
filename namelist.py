@@ -61,9 +61,9 @@ n_procs = 16              # number of processes to use in dask
 """
 These parameters configure the dates for the TC-risk model.
 """
-start_year = 2016                     # year to start downscaling
+start_year = 1981                     # year to start downscaling
 start_month = 1                       # month of start_year to start downscaling
-end_year = 2021                       # year to stop downscaling
+end_year = 2025                       # year to stop downscaling
 end_month = 12                        # month of end_year to stop downscaling
 
 """
@@ -71,7 +71,7 @@ These parameters configure the output.
 """
 output_interval_s = 3600              # output interval of tracks, seconds (does not change time integration)
 total_track_time_days = 25            # total time to integrate tracks, days (the original 15 cut 16% of tracks while still storms, 7% as hurricanes)
-tracks_per_year = 20                  # total number of tracks to simulate per year
+tracks_per_year = 1200                  # total number of tracks to simulate per year
 
 """
 These parameters configure thermodynamics and thermodynamic constants.
@@ -157,6 +157,7 @@ seed_density_ref = 0.6                # seed-day frequency at which every draw w
 # Atmospheric boundary layer depth (FAST), in meters. Sets how fast storms intensify and decay (rate ~ 1/depth)
 atm_bl_depth = {'NA': 2200.0, 'EP': 2200.0, 'WP': 2200.0, 'AU': 2200.0,
                 'SI': 2200.0, 'SP': 2200.0, 'NI': 2200.0}
+bl_inertial_scaling = False            # True: the layer gets shallower as the vortex stiffens above bl_v_ref_ms (makes storms grow too fast at 34-75 kt)
 bl_v_ref_ms = 18.0                    # intensity below which ventilation (and the depth above) ignores v, m/s
 bl_rmw_km = 50.0                      # radius of maximum wind used for the inertial stability, km
 log_chi_fac = 0.5                     # addition to chi in log space

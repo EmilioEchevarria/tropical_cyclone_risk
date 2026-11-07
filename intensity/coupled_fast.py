@@ -160,6 +160,8 @@ class Coupled_FAST(bam_track.BetaAdvectionTrack):
 
     """ Boundary-layer depth (m) for a vortex of intensity v (m/s) at latitude clat. """
     def _h_bl(self, v, clat):
+        if not getattr(namelist, 'bl_inertial_scaling', False):
+            return self.h_bl
         v_ref = namelist.bl_v_ref_ms
         if not (v > v_ref):
             return self.h_bl
